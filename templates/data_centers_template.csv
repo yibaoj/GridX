@@ -1,0 +1,2 @@
+province,city,name,operator,power_mw,it_load_mw,racks,area_sqm,pue,status,is_ai_center,source_url
+山东,济南,example data center,example operator,,,,,,operating,false,

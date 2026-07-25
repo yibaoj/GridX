@@ -1,0 +1,56 @@
+# Downloaded source data and generated results
+data/
+outputs/
+references/
+reports/
+
+# Large research and geospatial artifacts
+*.pdf
+*.xlsx
+*.xls
+*.zip
+*.7z
+*.pbf
+*.gpkg
+*.geojsonseq
+*.tif
+*.tiff
+*.parquet
+*.nc
+
+# Generated figures
+*.png
+*.jpg
+*.jpeg
+*.svg
+
+# Python and Jupyter caches
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local environments, credentials, and secrets
+.venv/
+venv/
+env/
+.env
+.env.*
+*.pem
+*.key
+.cdsapirc
+
+# Editor and operating-system files
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~
+
+# Temporary logs and files
+*.log
+*.tmp
