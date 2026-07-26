@@ -1,0 +1,49 @@
+rule_id,priority,source,source_type_pattern,technology_pattern,fuel_pattern,dataset,type,technology
+gem_storage_mixed_hydro,10,gem,^hydropower$,^conventional and pumped storage$,.*,storage,pumped_storage,mixed_conventional_pumped_hydro
+gem_storage_pumped_hydro,20,gem,^hydropower$,^pumped storage$,.*,storage,pumped_storage,pumped_hydro
+gem_coal_igcc,30,gem,^coal$,^IGCC$,.*,generation,coal,igcc
+gem_coal_subcritical,40,gem,^coal$,^subcritical(?:/CCS)?$,.*,generation,coal,subcritical
+gem_coal_supercritical,50,gem,^coal$,^supercritical(?:/CCS)?$,.*,generation,coal,supercritical
+gem_coal_ultra_supercritical,60,gem,^coal$,^ultra-supercritical(?:/CCS)?$,.*,generation,coal,ultra_supercritical
+gem_gas_combined_cycle,70,gem,^oil/gas$,^combined cycle$,.*(?:gas|LNG|methane).*,generation,gas,combined_cycle
+gem_gas_turbine,80,gem,^oil/gas$,^gas turbine$,.*(?:gas|LNG|methane).*,generation,gas,gas_turbine
+gem_gas_steam_turbine,90,gem,^oil/gas$,^steam turbine$,.*(?:gas|LNG|methane).*,generation,gas,steam_turbine
+gem_gas_internal_combustion,100,gem,^oil/gas$,^internal combustion$,.*(?:gas|LNG|methane).*,generation,gas,internal_combustion
+gem_gas_unknown,110,gem,^oil/gas$,^unknown$,.*(?:gas|LNG|methane).*,generation,gas,
+gem_other_combined_cycle,120,gem,^oil/gas$,^combined cycle$,.*,generation,other,oil_combined_cycle
+gem_other_gas_turbine,130,gem,^oil/gas$,^gas turbine$,.*,generation,other,oil_gas_turbine
+gem_other_steam_turbine,140,gem,^oil/gas$,^steam turbine$,.*,generation,other,oil_steam_turbine
+gem_other_internal_combustion,150,gem,^oil/gas$,^internal combustion$,.*,generation,other,oil_internal_combustion
+gem_bioenergy_municipal_waste,160,gem,^bioenergy$,,.*municipal.*|.*industrial wastes.*,generation,bioenergy,municipal_waste
+gem_bioenergy_biogas,170,gem,^bioenergy$,,.*agricultural waste.*biogas.*,generation,bioenergy,biogas
+gem_bioenergy_agricultural,180,gem,^bioenergy$,,.*agricultural waste.*,generation,bioenergy,agricultural_biomass
+gem_bioenergy_wood,190,gem,^bioenergy$,,.*wood.*biomass.*,generation,bioenergy,wood_biomass
+gem_bioenergy_sewage,200,gem,^bioenergy$,,.*wastewater.*|.*sewage sludge.*,generation,bioenergy,sewage_sludge
+gem_bioenergy_paper_mill,210,gem,^bioenergy$,,.*paper mill.*,generation,bioenergy,paper_mill_waste
+gem_bioenergy_other,220,gem,^bioenergy$,,,generation,bioenergy,
+gem_geothermal,230,gem,^geothermal$,,,generation,geothermal,
+gem_nuclear_pwr,240,gem,^nuclear$,^pressurized water reactor$,.*,generation,nuclear,pressurized_water_reactor
+gem_nuclear_fast_breeder,250,gem,^nuclear$,^fast breeder reactor$,.*,generation,nuclear,fast_breeder_reactor
+gem_nuclear_high_temperature_gas,260,gem,^nuclear$,^high temperature gas reactor$,.*,generation,nuclear,high_temperature_gas_reactor
+gem_hydro_run_of_river,270,gem,^hydropower$,^run-of-river$,.*,generation,hydropower,run_of_river
+gem_hydro_reservoir,280,gem,^hydropower$,^conventional storage$,.*,generation,hydropower,reservoir
+gem_hydro_mixed,290,gem,^hydropower$,^conventional and run-of-river$,.*,generation,hydropower,mixed_reservoir_run_of_river
+gem_hydro_other,300,gem,^hydropower$,,,generation,hydropower,
+gem_solar_thermal,310,gem,^utility-scale solar$,^Solar Thermal$,.*,generation,solar,solar_thermal
+gem_solar_utility_pv,320,gem,^utility-scale solar$,^(?:PV|Assumed PV)$,.*,generation,solar,utility_scale_pv
+gem_solar_other,330,gem,^utility-scale solar$,,,generation,solar,
+gem_wind_onshore,340,gem,^wind$,^Onshore$,.*,generation,wind,onshore
+gem_wind_offshore_fixed,350,gem,^wind$,^Offshore hard mount$,.*,generation,wind,offshore_fixed
+gem_wind_offshore_floating,360,gem,^wind$,^Offshore floating$,.*,generation,wind,offshore_floating
+gem_wind_offshore_unspecified,370,gem,^wind$,^Offshore mount unknown$,.*,generation,wind,offshore_unspecified
+gem_wind_other,380,gem,^wind$,,,generation,wind,
+gem_generation_fallback,390,gem,.*,.*,.*,generation,other,
+doe_battery_lithium_ion,10,doe,,^Lithium-ion battery$,,storage,battery_storage,lithium_ion
+doe_battery_flow,20,doe,,^Flow battery$,,storage,battery_storage,flow_battery
+doe_battery_sodium,30,doe,,^Sodium-based battery$,,storage,battery_storage,sodium_based
+doe_pumped_hydro,40,doe,,^Pumped hydro storage$,,storage,pumped_storage,pumped_hydro
+doe_compressed_air,50,doe,,^Compressed air energy storage$,,storage,compressed_air_storage,compressed_air
+doe_thermal_sensible,60,doe,,^Sensible heat$,,storage,thermal_storage,sensible_heat
+doe_thermal_other,70,doe,,^Heat thermal storage$,,storage,thermal_storage,other_thermal
+doe_capacitor,80,doe,,^Electro-chemical capacitor$,,storage,capacitor_storage,electrochemical_capacitor
+doe_storage_fallback,90,doe,,.*,,storage,other_storage,

@@ -1,8 +1,0 @@
-{
-  "input": "paper-codes/data/Global-Integrated-Power-March-2026-II.xlsx",
-  "sheet": "Power facilities",
-  "geojson": "paper-codes/data/china_provinces.geojson",
-  "status": ["operating"],
-  "country_scope": "mainland",
-  "technology_scheme": "gem"
-}

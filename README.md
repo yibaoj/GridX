@@ -32,11 +32,68 @@ conda activate env-py313
 - `cf_exp.ipynb`：基于ERA5和atlite生成逐小时网格风光水资源可用率。
 - `uc_exp.ipynb`：整合OSM、GEM和负荷结果的一日PyPSA机组组合demo。
 - `LOAD_WEIGHTING.md`：行业组合负荷权重、公式和候选数据源。
-- `gem_cap_stats.py`：省级/地市级GEM装机聚合与饼图。
-- `data_center_stats.py`：省级/地市级数据中心POI聚合与饼图。
 - `prepare_osm_power_network.sh`：从OSM PBF提取电力设施并生成GeoPackage。
-- `filter_power_voltage.py`：按电压等条件筛选OSM电力对象。
+- `src/raw/`：按稳定 `source_id` 下载、检查和定位原始数据。
+- `src/standard/`：按dataset拆分的标准数据包，统一字段、单位和格式。
+- `test_layers.ipynb`：分层模块的可执行接口示例。
 - `data/`、`config/`、`templates/`、`outputs/`：输入、配置、模板和结果。
+
+## 标准数据层
+
+`config/standard_data.toml`记录dataset与source依赖、预处理脚本和可调流程参数；
+`config/asset_type_mapping.csv`集中记录GEM/DOE到标准`type/technology`的有序
+映射规则。公共
+dataset ID固定为`spatial`、`network`、`generation`、`storage`、
+`parameter`、`load`、`population`和`resource`。
+
+```python
+from src.standard import StandardDataManager
+
+standard_data = StandardDataManager()
+standard_data.check()
+generation = standard_data.build("generation")
+network = standard_data.load("network")
+```
+
+实体dataset使用GeoParquet；`network`返回包含`nodes`和`branches`的
+`NetworkData`；`parameter`使用Parquet；连续时空数据使用xarray和NetCDF。
+所有生成文件位于`outputs/standard/`。
+
+| 标准输出 | 内容 |
+|---|---|
+| `network_nodes.parquet` | 电网节点GeoDataFrame |
+| `network_branches.parquet` | 电网支路GeoDataFrame |
+| `generation.parquet` | 发电设备GeoDataFrame |
+| `storage.parquet` | 储能设备GeoDataFrame |
+| `spatial.parquet` | 行政区等空间单元GeoDataFrame |
+| `parameter.parquet` | 长表形式的技术经济参数 |
+| `load.nc` | `time × uid`逐时负荷 |
+| `population.nc` | `y × x`人口栅格 |
+
+推荐通过`StandardDataManager.load(dataset_id)`读取：它会选择正确的读取器，并把
+两个network文件恢复为一个`NetworkData`对象。Parquet/NetCDF也可以由
+GeoPandas、pandas或xarray直接读取，适合脱离本项目模块的独立分析。由于
+`voltage_kv`是Arrow list，直接读取实体GeoParquet时需要：
+
+```python
+import geopandas as gpd
+import pandas as pd
+
+generation = gpd.read_parquet(
+    "outputs/standard/generation.parquet",
+    to_pandas_kwargs={"types_mapper": pd.ArrowDtype},
+)
+```
+
+标准`network`不设置最低电压阈值，只要求line/cable具备可解析的电压；算例所需的
+220 kV、500 kV等阈值应在后续system-case层选择。原始PBF更新或GPKG缺失时，
+manager根据TOML调用`prepare_osm_power_network.sh`重建派生文件。
+
+分类规则按`source`分组并按`priority`升序执行，第一条匹配规则生效。新增
+`type/technology`时，在`asset_type_mapping.csv`中增加一条具有唯一`rule_id`
+和优先级的具体规则，并放在该来源的fallback规则之前；无需修改Python。输出中的
+`classification_rule_id`可反查命中规则，`technology_raw`、`fuel_raw`等字段用于
+抽样复核；fallback记录应作为人工校验重点。
 
 ## OSM电网拓扑
 
@@ -179,32 +236,6 @@ generators和108个storage units，HiGHS返回optimal。日负荷30,217.94 GWh�
 - `outputs/uc_commitment_status_2024-08-01.csv`
 - `outputs/uc_dispatch_2024-08-01.png`
 
-## 聚合脚本
-
-电源容量省级/地市级统计使用同一脚本：
-
-```bash
-conda run -n env-py313 python paper-codes/gem_cap_stats.py --level province
-conda run -n env-py313 python paper-codes/gem_cap_stats.py --level city
-```
-
-默认使用GEM `operating` 单位/阶段数据。GEM项目追踪口径与国家能源局年末统计
-不同，尤其不能完整覆盖分布式光伏、自备电厂和未公开项目。官方对比输入格式见
-`templates/official_capacity_template.csv`。
-
-数据中心统计：
-
-```bash
-conda run -n env-py313 python paper-codes/data_center_stats.py \
-  --config paper-codes/config/data_center_stats.json --level province
-conda run -n env-py313 python paper-codes/data_center_stats.py \
-  --config paper-codes/config/data_center_stats.json --level city
-```
-
-输入 `data/china_datacenter_poi_2024.csv` 来自Science Data Bank数据集
-`10.57760/sciencedb.32970`。该数据没有MW、IT load、机架数、PUE或年用电量；
-地图圆面积表示设施数量，扇区表示设施类型，不能解释为数据中心电力容量。
-
 ## 环境与参考
 
 固定依赖见 `requirements.txt`。负荷空间处理新增Rasterio，逐时节点负荷使用
@@ -218,7 +249,6 @@ PyArrow/Parquet保存。
 - [GeoPandas documentation](https://geopandas.org/en/stable/docs.html)
 - [NetworkX MultiGraph](https://networkx.org/documentation/stable/reference/classes/multigraph.html)
 - [中国标准地图服务](https://bzdt.ch.mnr.gov.cn/)
-- [中国大型数据中心数据集](https://doi.org/10.57760/sciencedb.32970)
 - [中国省级逐时负荷数据论文](https://doi.org/10.1038/s41597-026-07327-8)
 - [中国省级逐时负荷数据](https://doi.org/10.6084/m9.figshare.29832701)
 - [WorldPop中国人口栅格](https://hub.worldpop.org/geodata/summary?id=29818)
