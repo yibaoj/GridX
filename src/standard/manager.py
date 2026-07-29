@@ -8,6 +8,7 @@ import tomllib
 
 import pandas as pd
 import xarray as xr
+from matplotlib.figure import Figure
 
 from ..raw import RawDataManager
 from .generation import _GenerationStandardizer
@@ -15,6 +16,7 @@ from .load import _LoadStandardizer
 from .network import _NetworkStandardizer
 from .parameter import _ParameterStandardizer
 from .population import _PopulationStandardizer
+from .plot import PLOTTERS
 from .resource import _ResourceStandardizer
 from .schema import DATASET_IDS, NetworkData, _read_geodataframe
 from .spatial import _SpatialStandardizer
@@ -114,6 +116,14 @@ class StandardDataManager:
         if dataset_id == "parameter":
             return pd.read_parquet(paths[0], dtype_backend="pyarrow")
         return xr.open_dataset(paths[0])
+
+    def plot(self, dataset_id: str, **kwargs: object) -> Figure:
+        """Return one representative figure without writing an output file."""
+
+        data = self.load(dataset_id)
+        if dataset_id in {"network", "population", "resource"}:
+            kwargs.setdefault("spatial", self.load("spatial"))
+        return PLOTTERS[dataset_id](data, **kwargs)
 
     def _select(
         self,

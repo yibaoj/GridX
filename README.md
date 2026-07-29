@@ -173,9 +173,8 @@ near/distant由 `candidate_distance_km=100` 划分；Location accuracy保留为
 这些结果是地理候选，不是已核实的并网站或接入电压。
 
 GEM类型进一步把光伏与`solar_thermal`、陆上与`offshore_wind`分开。
-`config/generation_technical_assumptions.csv`保存生产模拟所需的启停、爬坡和
-最小出力规则，`config/generation_economic_mapping.csv`把细分类型映射到
-`data/pypsa_technology_data_costs_2025.csv`。生成的`gem_unit_parameters`
+`config/technical_economic_assumptions.csv`统一保存发电与储能设备的启停、
+爬坡、最小出力和经济参数映射。生成的`gem_unit_parameters`
 是一行一个GEM unit/phase的技术经济宽表；它没有geometry和并网节点。
 `gem_grid_matches`保留空间信息和候选节点，UC中按`GEM unit/phase ID`一对一
 合并为`uc_generation_units`。PyPSA成本主要是欧洲/国际口径，Dispa-SET启停值

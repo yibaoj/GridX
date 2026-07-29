@@ -57,8 +57,7 @@ source_ids = ["pypsa_technology_costs"]
 output = "parameter.parquet"
 
 [datasets.parameter.options]
-technical_file = "config/generation_technical_assumptions.csv"
-economic_file = "config/generation_economic_mapping.csv"
+assumptions_file = "config/technical_economic_assumptions.csv"
 pypsa_year = 2025
 
 [datasets.load]

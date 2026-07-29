@@ -31,8 +31,16 @@ class SourceCatalog:
             raise ValueError(f"Raw data catalog is missing: {sorted(missing)}")
         if table["source_id"].duplicated().any():
             raise ValueError("Raw data catalog contains duplicate source_id values.")
-        table["required"] = table["required"].map(
-            lambda value: str(value).strip().lower() in {"1", "true", "yes"}
+        table["required"] = pd.Series(
+            [
+                True
+                if str(value).strip().lower() in {"1", "true", "yes"}
+                else False
+                if str(value).strip().lower() in {"0", "false", "no"}
+                else pd.NA
+                for value in table["required"]
+            ],
+            dtype="boolean",
         )
         self.table = table.set_index("source_id", drop=False)
 
