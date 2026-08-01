@@ -31,6 +31,23 @@ class SourceCatalog:
             raise ValueError(f"Raw data catalog is missing: {sorted(missing)}")
         if table["source_id"].duplicated().any():
             raise ValueError("Raw data catalog contains duplicate source_id values.")
+        for source_id, value in table[["source_id", "local_path"]].itertuples(
+            index=False
+        ):
+            path = Path(str(value).strip())
+            if not str(value).strip() or path.is_absolute() or ".." in path.parts:
+                raise ValueError(
+                    f"{source_id} local_path must be a relative path inside data/."
+                )
+        if "remote_file_name" in table:
+            for source_id, value in table[
+                ["source_id", "remote_file_name"]
+            ].itertuples(index=False):
+                name = str(value).strip()
+                if name and Path(name).name != name:
+                    raise ValueError(
+                        f"{source_id} remote_file_name must contain only a filename."
+                    )
         table["required"] = pd.Series(
             [
                 True

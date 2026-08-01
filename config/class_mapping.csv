@@ -1,4 +1,4 @@
-rule_id,priority,source,source_type_pattern,technology_pattern,fuel_pattern,dataset,type,technology
+rule_id,priority,source,source_type_pattern,technology_pattern,fuel_pattern,dataset,class,subclass
 gem_storage_mixed_hydro,10,gem,^hydropower$,^conventional and pumped storage$,.*,storage,pumped_storage,mixed_conventional_pumped_hydro
 gem_storage_pumped_hydro,20,gem,^hydropower$,^pumped storage$,.*,storage,pumped_storage,pumped_hydro
 gem_coal_igcc,30,gem,^coal$,^IGCC$,.*,generation,coal,igcc

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from .base import _Standardizer
-from .schema import _numeric, _voltage_series
+from .schema import _finalize_frame, _numeric, _write_dataframe
 
 
 class _ParameterStandardizer(_Standardizer):
@@ -30,8 +30,8 @@ class _ParameterStandardizer(_Standardizer):
         required_columns = {
             "assumption_id",
             "applies_to_dataset",
-            "type",
-            "technology",
+            "class",
+            "subclass",
         }
         missing = required_columns.difference(assumptions.columns)
         if missing:
@@ -55,15 +55,14 @@ class _ParameterStandardizer(_Standardizer):
                     ),
                     "applies_to_dataset": row["applies_to_dataset"],
                     "applies_to_uid": pd.NA,
-                    "type": row["type"],
-                    "technology": row["technology"],
+                    "class": row["class"],
+                    "subclass": row["subclass"],
                     "status": pd.NA,
-                    "voltage_kv": None,
+                    "observed_at": pd.NA,
                     "valid_from": pd.NA,
                     "valid_to": pd.NA,
-                    "observed_at": pd.NA,
                     "source_id": "technical_economic_assumptions",
-                    "source_record_id": row["assumption_id"],
+                    "source_uid": row["assumption_id"],
                     "parameter_name": parameter_name,
                     "value": float(row[parameter_name]),
                     "unit": unit,
@@ -78,26 +77,25 @@ class _ParameterStandardizer(_Standardizer):
 
         pypsa_source = self.config["source_ids"][0]
         costs = pd.read_csv(self.source(pypsa_source))
-        for index, row in costs.iterrows():
+        for _, row in costs.iterrows():
             value = pd.to_numeric(row.get("value"), errors="coerce")
             if pd.isna(value):
                 continue
             rows.append({
                 "uid": (
-                    f"pypsa:{row.get('technology')}:{row.get('parameter')}:"
+                    f"{pypsa_source}:{row.get('technology')}:{row.get('parameter')}:"
                     f"{self.options['pypsa_year']}"
                 ),
                 "applies_to_dataset": pd.NA,
                 "applies_to_uid": pd.NA,
-                "type": pd.NA,
-                "technology": row.get("technology"),
+                "class": pd.NA,
+                "subclass": row.get("technology"),
                 "status": pd.NA,
-                "voltage_kv": None,
+                "observed_at": pd.NA,
                 "valid_from": str(self.options["pypsa_year"]),
                 "valid_to": pd.NA,
-                "observed_at": pd.NA,
                 "source_id": pypsa_source,
-                "source_record_id": str(index),
+                "source_uid": f"{row.get('technology')}:{row.get('parameter')}",
                 "parameter_name": row.get("parameter"),
                 "value": float(value),
                 "unit": row.get("unit"),
@@ -110,19 +108,10 @@ class _ParameterStandardizer(_Standardizer):
                 "fuel_technology": pd.NA,
             })
 
-        result = pd.DataFrame(rows)
-        for column in (
-            "uid",
-            "applies_to_dataset",
-            "applies_to_uid",
-            "type",
-            "technology",
-            "status",
-            "valid_from",
-            "valid_to",
-            "observed_at",
-            "source_id",
-            "source_record_id",
+        result = _finalize_frame(
+            pd.DataFrame(rows),
+            schema_id="parameter",
+            string_columns=(
             "parameter_name",
             "unit",
             "quality",
@@ -130,16 +119,11 @@ class _ParameterStandardizer(_Standardizer):
             "reference_url",
             "pypsa_technology",
             "fuel_technology",
-        ):
-            result[column] = result[column].astype("string")
-        result["voltage_kv"] = _voltage_series(result["voltage_kv"], result.index)
+            ),
+        )
         for column in ("value", "capacity_min_mw", "capacity_max_mw"):
             result[column] = pd.to_numeric(result[column], errors="coerce").astype(
                 "Float64"
             )
-        if result["uid"].isna().any() or result["uid"].duplicated().any():
-            raise ValueError("Parameter uid values must be present and unique.")
-        path = self.output()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        result.to_parquet(path, index=False)
+        _write_dataframe(result, self.output())
         return result

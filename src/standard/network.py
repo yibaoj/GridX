@@ -18,7 +18,7 @@ from shapely.strtree import STRtree
 from .base import _Standardizer
 from .schema import (
     NetworkData,
-    _finalize_entities,
+    _finalize_frame,
     _numeric,
     _osm_voltages,
     _partial_time,
@@ -42,7 +42,10 @@ class _NetworkStandardizer(_Standardizer):
     def build(self) -> NetworkData:
         source_id = self.config["source_ids"][0]
         pbf_path = self.source(source_id)
-        feature_path = self.manager.project_root / self.options["feature_file"]
+        feature_output_prefix = (
+            self.manager.project_root / self.options["feature_output_prefix"]
+        )
+        feature_path = Path(f"{feature_output_prefix}.gpkg")
         preparation_script = (
             self.manager.project_root / self.options["preparation_script"]
         )
@@ -55,10 +58,7 @@ class _NetworkStandardizer(_Standardizer):
                 [
                     str(preparation_script),
                     str(pbf_path),
-                    str(
-                        self.manager.project_root
-                        / self.options["feature_output_prefix"]
-                    ),
+                    str(feature_output_prefix),
                 ],
                 cwd=self.manager.project_root,
                 check=True,
@@ -317,49 +317,39 @@ class _NetworkStandardizer(_Standardizer):
                     "uid": (
                         f"{line_uid}:node:{start_raw}:node:{end_raw}"
                     ),
-                    "type": line.standard_type,
-                    "technology": (
+                    "class": line.standard_type,
+                    "subclass": (
                         f"{current_type.lower()}_overhead_line"
                         if line.standard_type == "line"
                         else f"{current_type.lower()}_cable"
                     ),
                     "status": line.standard_status,
                     "voltage_kv": line.voltage_values,
+                    "from_uid": from_uid,
+                    "to_uid": to_uid,
+                    "length_km": pd.NA,
+                    "geometry": LineString(coordinates),
+                    "geometry_method": "source_geometry",
+                    "observed_at": observed_at,
                     "valid_from": _partial_time(
                         line.start_date if hasattr(line, "start_date") else pd.NA
                     ),
                     "valid_to": _partial_time(
                         line.closing_date if hasattr(line, "closing_date") else pd.NA
                     ),
-                    "observed_at": observed_at,
                     "source_id": source_id,
-                    "source_record_id": line_uid.removeprefix("osm:"),
-                    "geometry_method": "source_geometry",
-                    "from_uid": from_uid,
-                    "to_uid": to_uid,
+                    "source_uid": line_uid.removeprefix("osm:"),
                     "name": line.name,
                     "operator": line.operator,
                     "current_type": current_type,
                     "frequency_hz": _numeric(line.frequency),
                     "circuits": _numeric(line.circuits),
                     "cables": _numeric(line.cables),
-                    "length_km": pd.NA,
-                    "geometry": LineString(coordinates),
                 })
 
-        branches = _finalize_entities(
+        branches = _finalize_frame(
             pd.DataFrame(branch_rows),
-            extra_columns=(
-                "from_uid",
-                "to_uid",
-                "name",
-                "operator",
-                "current_type",
-                "frequency_hz",
-                "circuits",
-                "cables",
-                "length_km",
-            ),
+            schema_id="network.branches",
             string_columns=(
                 "from_uid",
                 "to_uid",
@@ -387,20 +377,20 @@ class _NetworkStandardizer(_Standardizer):
             node_id = int(uid.rsplit(":", 1)[1])
             node_rows.append({
                 "uid": uid,
-                "type": "junction",
-                "technology": "topological_junction",
+                "class": "junction",
+                "subclass": "topological_junction",
                 "status": pd.NA,
                 "voltage_kv": sorted(voltages),
+                "geometry": Point(node_coordinates[node_id]),
+                "geometry_method": "source_geometry",
+                "observed_at": observed_at,
                 "valid_from": pd.NA,
                 "valid_to": pd.NA,
-                "observed_at": observed_at,
                 "source_id": source_id,
-                "source_record_id": f"node:{node_id}",
-                "geometry_method": "source_geometry",
+                "source_uid": f"node:{node_id}",
                 "name": pd.NA,
                 "operator": pd.NA,
                 "frequency_hz": pd.NA,
-                "geometry": Point(node_coordinates[node_id]),
             })
         for row in node_rows:
             if row["uid"] in incident_voltage:
@@ -408,9 +398,9 @@ class _NetworkStandardizer(_Standardizer):
                     set(row.get("voltage_kv") or [])
                     | incident_voltage[row["uid"]]
                 )
-        nodes = _finalize_entities(
+        nodes = _finalize_frame(
             pd.DataFrame(node_rows),
-            extra_columns=("name", "operator", "frequency_hz"),
+            schema_id="network.nodes",
             string_columns=("name", "operator"),
         )
         nodes["frequency_hz"] = pd.to_numeric(
@@ -526,32 +516,32 @@ class _NetworkStandardizer(_Standardizer):
                 "" if pd.isna(station.substation) else str(station.substation).lower()
             )
             if station.standard_type == "converter" or "converter" in station_class:
-                technology = "converter_station"
+                subclass = "converter_station"
             elif station_class == "transmission":
-                technology = "transmission_substation"
+                subclass = "transmission_substation"
             elif station_class == "distribution":
-                technology = "distribution_substation"
+                subclass = "distribution_substation"
             else:
-                technology = pd.NA
+                subclass = pd.NA
             rows.append({
                 "uid": station.source_uid,
-                "type": "station",
-                "technology": technology,
+                "class": "station",
+                "subclass": subclass,
                 "status": station.standard_status,
                 "voltage_kv": station.voltage_values,
+                "geometry": station.geometry,
+                "geometry_method": "source_geometry",
+                "observed_at": observed_at,
                 "valid_from": _partial_time(
                     station.start_date if hasattr(station, "start_date") else pd.NA
                 ),
                 "valid_to": _partial_time(
                     station.closing_date if hasattr(station, "closing_date") else pd.NA
                 ),
-                "observed_at": observed_at,
                 "source_id": source_id,
-                "source_record_id": station.source_uid.removeprefix("osm:"),
-                "geometry_method": "source_geometry",
+                "source_uid": station.source_uid.removeprefix("osm:"),
                 "name": station.name,
                 "operator": station.operator,
                 "frequency_hz": _numeric(station.frequency),
-                "geometry": station.geometry,
             })
         return rows

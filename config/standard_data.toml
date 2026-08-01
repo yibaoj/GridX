@@ -13,7 +13,6 @@ source_ids = ["osm_china_pbf"]
 outputs = { nodes = "network_nodes.parquet", branches = "network_branches.parquet" }
 
 [datasets.network.options]
-feature_file = "data/osm/china-power-network.gpkg"
 feature_layer = "power_features"
 preparation_script = "prepare_osm_power_network.sh"
 feature_output_prefix = "data/osm/china-power-network"
@@ -34,7 +33,7 @@ sheet = "Power facilities"
 country_areas = ["China", "China mainland"]
 include_statuses = []
 observed_at = "2026-03"
-asset_mapping_file = "config/asset_type_mapping.csv"
+class_mapping_file = "config/class_mapping.csv"
 
 [datasets.storage]
 processor = "storage"
@@ -49,7 +48,7 @@ doe_country = "China"
 doe_statuses = []
 gem_observed_at = "2026-03"
 doe_observed_at = "2022"
-asset_mapping_file = "config/asset_type_mapping.csv"
+class_mapping_file = "config/class_mapping.csv"
 
 [datasets.parameter]
 processor = "parameter"
@@ -69,12 +68,16 @@ output = "load.nc"
 years = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024]
 timezone = "Asia/Shanghai"
 interval = "1h"
-time_reference = "interval_start"
 
 [datasets.population]
 processor = "population"
 source_ids = ["worldpop_population"]
-output = "population.nc"
+output = "population.parquet"
+
+[datasets.population.options]
+aggregation_factor = 30
+observed_at = "2020"
+valid_from = "2020"
 
 [datasets.resource]
 processor = "resource"
@@ -83,6 +86,7 @@ output = "resource.nc"
 
 [datasets.resource.options]
 year = 2024
+time_step = "1h"
 onshore_turbine = "NREL_ReferenceTurbine_2020ATB_5.5MW"
 offshore_turbine = "NREL_ReferenceTurbine_2020ATB_15MW_offshore"
 solar_panel = "CSi"

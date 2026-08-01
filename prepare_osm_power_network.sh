@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_NAME="${CONDA_ENV_NAME:-env-py313}"
-INPUT_PBF="${1:-${SCRIPT_DIR}/data/osm/china-latest.osm.pbf}"
-OUTPUT_PREFIX="${2:-${SCRIPT_DIR}/data/osm/china-power-network}"
+
+if [[ "$#" -ne 2 ]]; then
+    printf 'Usage: %s INPUT_PBF OUTPUT_PREFIX\n' "$0" >&2
+    exit 2
+fi
+
+INPUT_PBF="$1"
+OUTPUT_PREFIX="$2"
 
 FILTERED_PBF="${OUTPUT_PREFIX}.osm.pbf"
 GEOJSONSEQ="${OUTPUT_PREFIX}.geojsonseq"

@@ -18,7 +18,15 @@ from .parameter import _ParameterStandardizer
 from .population import _PopulationStandardizer
 from .plot import PLOTTERS
 from .resource import _ResourceStandardizer
-from .schema import DATASET_IDS, NetworkData, _read_geodataframe
+from .schema import (
+    DATASET_IDS,
+    NetworkData,
+    _SCHEMA_COLUMNS,
+    _dataset_schema,
+    _read_dataframe,
+    _read_geodataframe,
+    _validate_dataset,
+)
 from .spatial import _SpatialStandardizer
 from .storage import _StorageStandardizer
 
@@ -96,7 +104,9 @@ class StandardDataManager:
                     f"{list(missing_sources.index)}"
                 )
             processor = self._PROCESSORS[self.datasets[dataset_id]["processor"]]
-            results[dataset_id] = processor(self, dataset_id).build()
+            data = processor(self, dataset_id).build()
+            _validate_dataset(data, dataset_id)
+            results[dataset_id] = data
         return results[selected[0]] if isinstance(dataset_ids, str) else results
 
     def load(self, dataset_id: str) -> object:
@@ -107,15 +117,18 @@ class StandardDataManager:
                 f"{dataset_id} has not been built. Run build({dataset_id!r})."
             )
         if dataset_id == "network":
-            return NetworkData(
+            data = NetworkData(
                 _read_geodataframe(paths[0]),
                 _read_geodataframe(paths[1]),
             )
-        if dataset_id in {"spatial", "generation", "storage"}:
-            return _read_geodataframe(paths[0])
-        if dataset_id == "parameter":
-            return pd.read_parquet(paths[0], dtype_backend="pyarrow")
-        return xr.open_dataset(paths[0])
+        elif dataset_id in {"spatial", "generation", "storage", "population"}:
+            data = _read_geodataframe(paths[0])
+        elif dataset_id == "parameter":
+            data = _read_dataframe(paths[0])
+        else:
+            data = xr.open_dataset(paths[0])
+        _validate_dataset(data, dataset_id)
+        return data
 
     def plot(self, dataset_id: str, **kwargs: object) -> Figure:
         """Return one representative figure without writing an output file."""
@@ -124,6 +137,37 @@ class StandardDataManager:
         if dataset_id in {"network", "population", "resource"}:
             kwargs.setdefault("spatial", self.load("spatial"))
         return PLOTTERS[dataset_id](data, **kwargs)
+
+    def schema(
+        self,
+        dataset_ids: str | Iterable[str] | None = None,
+    ) -> pd.DataFrame:
+        """Describe actual columns or arrays in materialized standard data."""
+
+        selected = self._select(dataset_ids)
+        available = self.check(selected)["output_available"]
+        if dataset_ids is not None and not available.all():
+            raise FileNotFoundError(
+                "Standard outputs are unavailable for: "
+                f"{available.index[~available].tolist()}"
+            )
+        tables = []
+        for dataset_id in available.index[available]:
+            data = self.load(dataset_id)
+            table = _dataset_schema(data)
+            table.insert(0, "dataset_id", dataset_id)
+            tables.append(table)
+            if isinstance(data, xr.Dataset):
+                data.close()
+        result = (
+            pd.concat(tables, ignore_index=True)
+            if tables
+            else pd.DataFrame(columns=("dataset_id", *_SCHEMA_COLUMNS))
+        )
+        result.attrs["unavailable_dataset_ids"] = tuple(
+            available.index[~available]
+        )
+        return result
 
     def _select(
         self,

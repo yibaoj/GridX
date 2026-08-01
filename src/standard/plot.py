@@ -69,8 +69,8 @@ def plot_network(
         label="Branches",
         zorder=2,
     )
-    junctions = data.nodes[data.nodes["type"].eq("junction")]
-    stations = data.nodes[data.nodes["type"].eq("station")]
+    junctions = data.nodes[data.nodes["class"].eq("junction")]
+    stations = data.nodes[data.nodes["class"].eq("station")]
     junctions.plot(
         ax=axis,
         color="#20272b",
@@ -113,49 +113,49 @@ def _capacity_plot(
     title: str,
 ) -> Figure:
     frame = data.loc[data[capacity_column].notna()].copy()
-    frame["_type"] = frame["type"].astype("string").fillna("unspecified")
-    frame["_technology"] = (
-        frame["technology"].astype("string").fillna("unspecified")
+    frame["_class"] = frame["class"].astype("string").fillna("unspecified")
+    frame["_subclass"] = (
+        frame["subclass"].astype("string").fillna("unspecified")
     )
     frame["_capacity_gw"] = (
         pd.to_numeric(frame[capacity_column], errors="coerce").fillna(0) / 1000
     )
-    by_type = (
-        frame.groupby("_type", observed=True)["_capacity_gw"].sum().sort_values()
+    by_class = (
+        frame.groupby("_class", observed=True)["_capacity_gw"].sum().sort_values()
     )
-    by_technology = (
-        frame.groupby(["_type", "_technology"], observed=True)["_capacity_gw"]
+    by_subclass = (
+        frame.groupby(["_class", "_subclass"], observed=True)["_capacity_gw"]
         .sum()
         .sort_values()
     )
-    type_colors = {
-        name: plt.colormaps["tab20"](index / max(len(by_type), 1))
-        for index, name in enumerate(by_type.index)
+    class_colors = {
+        name: plt.colormaps["tab20"](index / max(len(by_class), 1))
+        for index, name in enumerate(by_class.index)
     }
 
     figure, axes = plt.subplots(
         1,
         2,
-        figsize=(14, max(6, 0.28 * len(by_technology))),
+        figsize=(14, max(6, 0.28 * len(by_subclass))),
         constrained_layout=True,
     )
     axes[0].barh(
-        by_type.index,
-        by_type.values,
-        color=[type_colors[name] for name in by_type.index],
+        by_class.index,
+        by_class.values,
+        color=[class_colors[name] for name in by_class.index],
     )
-    technology_labels = [
-        f"{asset_type} / {technology}"
-        for asset_type, technology in by_technology.index
+    subclass_labels = [
+        f"{asset_class} / {subclass}"
+        for asset_class, subclass in by_subclass.index
     ]
     axes[1].barh(
-        technology_labels,
-        by_technology.values,
-        color=[type_colors[asset_type] for asset_type, _ in by_technology.index],
+        subclass_labels,
+        by_subclass.values,
+        color=[class_colors[asset_class] for asset_class, _ in by_subclass.index],
     )
     for axis, subtitle in zip(
         axes,
-        ("Primary type", "Technology"),
+        ("Class", "Subclass"),
         strict=True,
     ):
         axis.set_title(subtitle)
@@ -167,33 +167,33 @@ def _capacity_plot(
 
 
 def plot_generation(data: gpd.GeoDataFrame, **_: object) -> Figure:
-    """Plot generation capacity by primary type and technology."""
+    """Plot generation capacity by class and subclass."""
 
     return _capacity_plot(
         data,
         "capacity_mw",
-        "Generation capacity by type and technology",
+        "Generation capacity by class and subclass",
     )
 
 
 def plot_storage(data: gpd.GeoDataFrame, **_: object) -> Figure:
-    """Plot storage power capacity by primary type and technology."""
+    """Plot storage power capacity by class and subclass."""
 
     return _capacity_plot(
         data,
         "power_capacity_mw",
-        "Storage power capacity by type and technology",
+        "Storage power capacity by class and subclass",
     )
 
 
 def plot_parameter(data: pd.DataFrame, **_: object) -> Figure:
-    """Plot parameter-record coverage by standard asset type."""
+    """Plot parameter-record coverage by standard asset class."""
 
     frame = data.loc[
-        data["type"].notna() & data["parameter_name"].notna(),
-        ["type", "parameter_name"],
+        data["class"].notna() & data["parameter_name"].notna(),
+        ["class", "parameter_name"],
     ].copy()
-    coverage = pd.crosstab(frame["type"], frame["parameter_name"])
+    coverage = pd.crosstab(frame["class"], frame["parameter_name"])
     coverage = coverage.loc[
         coverage.sum(axis=1).sort_values(ascending=False).index,
         coverage.sum(axis=0).sort_values(ascending=False).index,
@@ -206,7 +206,7 @@ def plot_parameter(data: pd.DataFrame, **_: object) -> Figure:
     axis.set_xticks(range(len(coverage.columns)), coverage.columns, rotation=60)
     axis.set_yticks(range(len(coverage.index)), coverage.index)
     axis.set_xlabel("Parameter")
-    axis.set_ylabel("Asset type")
+    axis.set_ylabel("Asset class")
     axis.set_title("Technical-economic parameter coverage")
     figure.colorbar(image, ax=axis, label="Parameter records")
     return figure
@@ -215,16 +215,12 @@ def plot_parameter(data: pd.DataFrame, **_: object) -> Figure:
 def plot_load(data: xr.Dataset, *, year: int = 2024, **_: object) -> Figure:
     """Plot one year of stacked provincial load and national total load."""
 
-    load = data["demand_mw"].sel(time=str(year))
+    load = data["demand_mw"].sel(time=str(year)).sum("class")
     if load.sizes.get("time", 0) not in {8760, 8784}:
         raise ValueError(f"Load data for {year} is not a complete hourly year.")
     order = np.argsort(load.sum("time").values)[::-1]
     load = load.isel(uid=order)
-    labels = (
-        data["source_region_name"].isel(uid=order).values.astype(str)
-        if "source_region_name" in data.coords
-        else data["region_name"].isel(uid=order).values.astype(str)
-    )
+    labels = data["location"].isel(uid=order).values.astype(str)
     palettes = [
         plt.colormaps["tab20"](np.linspace(0, 1, 20)),
         plt.colormaps["tab20b"](np.linspace(0, 1, 20)),
@@ -259,48 +255,29 @@ def plot_load(data: xr.Dataset, *, year: int = 2024, **_: object) -> Figure:
     return figure
 
 
-def _display_raster(
-    axis: plt.Axes,
-    values: np.ndarray,
-    x: np.ndarray,
-    y: np.ndarray,
-    *,
-    cmap: str,
-    maximum_pixels: int = 1_600,
-) -> object:
-    y_step = max(1, math.ceil(values.shape[-2] / maximum_pixels))
-    x_step = max(1, math.ceil(values.shape[-1] / maximum_pixels))
-    sampled = values[::y_step, ::x_step]
-    return axis.imshow(
-        sampled,
-        extent=[float(x.min()), float(x.max()), float(y.min()), float(y.max())],
-        origin="upper",
-        cmap=cmap,
-        interpolation="nearest",
-        aspect="equal",
-    )
-
-
 def plot_population(
-    data: xr.Dataset,
+    data: gpd.GeoDataFrame,
     *,
     spatial: gpd.GeoDataFrame | None = None,
     **_: object,
 ) -> Figure:
-    """Plot the population raster on a logarithmic display scale."""
+    """Plot standardized population grid cells on a logarithmic scale."""
 
-    values = np.log10(np.clip(data["population"].values, 0, None) + 1)
+    frame = data.copy()
+    frame["_display_population"] = np.log10(
+        pd.to_numeric(frame["population"], errors="coerce").fillna(0).clip(lower=0) + 1
+    )
     figure, axis = plt.subplots(figsize=(11, 8), constrained_layout=True)
-    image = _display_raster(
-        axis,
-        values,
-        data["x"].values,
-        data["y"].values,
+    frame.plot(
+        ax=axis,
+        column="_display_population",
         cmap="magma",
+        linewidth=0,
+        legend=True,
+        legend_kwds={"label": "log10(persons per grid cell + 1)"},
     )
     _province_boundaries(axis, spatial)
-    figure.colorbar(image, ax=axis, label="log10(persons per source cell + 1)")
-    _finish_map(axis, "Population raster")
+    _finish_map(axis, "Population grid")
     return figure
 
 
@@ -310,12 +287,13 @@ def plot_resource(
     spatial: gpd.GeoDataFrame | None = None,
     **_: object,
 ) -> Figure:
-    """Plot annual mean availability for each weather-dependent technology."""
+    """Plot annual mean availability for each resource class."""
 
     availability = data["availability_pu"].mean("time")
-    technologies = availability["technology"].values.astype(str)
-    columns = min(3, len(technologies))
-    rows = math.ceil(len(technologies) / columns)
+    classes = availability["class"].values.astype(str)
+    geometry = gpd.GeoSeries.from_wkt(data["geometry"].values, crs=data.attrs["crs"])
+    columns = min(3, len(classes))
+    rows = math.ceil(len(classes) / columns)
     figure, axes = plt.subplots(
         rows,
         columns,
@@ -323,23 +301,29 @@ def plot_resource(
         constrained_layout=True,
         squeeze=False,
     )
-    image = None
-    for axis, technology in zip(axes.flat, technologies, strict=False):
-        layer = availability.sel(technology=technology)
-        image = _display_raster(
-            axis,
-            layer.values,
-            layer["x"].values,
-            layer["y"].values,
-            cmap="viridis",
+    for axis, resource_class in zip(axes.flat, classes, strict=False):
+        layer = gpd.GeoDataFrame(
+            {"_availability": availability.sel({"class": resource_class}).values},
+            geometry=geometry,
+            crs=data.attrs["crs"],
         )
-        image.set_clim(0, 1)
+        layer.plot(
+            ax=axis,
+            column="_availability",
+            cmap="viridis",
+            vmin=0,
+            vmax=1,
+            markersize=2,
+        )
         _province_boundaries(axis, spatial)
-        _finish_map(axis, technology)
-    for axis in list(axes.flat)[len(technologies) :]:
+        _finish_map(axis, resource_class)
+    for axis in list(axes.flat)[len(classes) :]:
         axis.set_visible(False)
-    if image is not None:
-        figure.colorbar(image, ax=axes, label="Annual mean availability (p.u.)")
+    figure.colorbar(
+        plt.cm.ScalarMappable(norm=plt.Normalize(0, 1), cmap="viridis"),
+        ax=axes,
+        label="Annual mean availability (p.u.)",
+    )
     figure.suptitle("Weather-dependent resource availability")
     return figure
 

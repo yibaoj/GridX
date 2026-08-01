@@ -54,22 +54,29 @@ Each dataset has a focused processor module (`network.py`, `generation.py`,
 `manager.py` is the public orchestration interface, while `schema.py` owns the
 shared contract.
 
+Every standardizer writes its stable dataset ID as `standard_dataset_id` in
+the output metadata. Loaders restore and validate this value rather than
+inferring or injecting it from the requested filename.
+
 The raw OSM PBF is the source. `china-power-network.gpkg` is a reproducible
 derived cache built by the version-controlled script referenced in
 `config/standard_data.toml`. Voltage thresholds belong to system-case
 selection, not canonical standardization.
 
 Asset classification rules are stored in one auditable table,
-`config/asset_type_mapping.csv`. Rules are evaluated by ascending `priority`
-and first match wins. Every standardized asset keeps its matched `rule_id`.
+`config/class_mapping.csv`. Rules are evaluated by ascending `priority`
+and first match wins. Every standardized asset keeps its matched
+`mapping_rule_id`.
 
 Stable dataset IDs:
 
-- `spatial`: province, city, regular-grid, or custom-zone geometries.
+- `spatial`: administrative province, city, or other boundary geometries.
 - `network`: a bundle containing node and branch GeoDataFrames.
 - `generation` and `storage`: physical asset GeoDataFrames.
 - `parameter`: long-form technical and economic assumptions.
-- `load`, `population`, and `resource`: labeled xarray datasets.
+- `population`: a gridded population GeoDataFrame.
+- `load` and `resource`: labeled xarray datasets with `time`, `uid`, and
+  `class` dimensions.
 
 Entity tables use `DataFrame` or `GeoDataFrame`. Dense time-series data use
 `xarray`, because forcing `time x asset x scenario` data into one wide
@@ -77,8 +84,8 @@ Entity tables use `DataFrame` or `GeoDataFrame`. Dense time-series data use
 
 Entity voltage is a nullable Arrow `list[float64]` in kV. Partial ISO time
 strings preserve source precision, such as `2024`, `2024-03`, or an exact
-timestamp. `load` and `resource` reference entity or `spatial` IDs instead of
-duplicating geometry at every time step.
+timestamp. `load` and `resource` store one WKT geometry coordinate per `uid`,
+so geometry is not duplicated along the time dimension.
 
 ## 3. Spatiotemporal mapping layer: `spatiotemporal_mapping.py`
 

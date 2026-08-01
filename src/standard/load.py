@@ -9,6 +9,7 @@ import pandas as pd
 import xarray as xr
 
 from .base import _Standardizer
+from .schema import _write_xarray
 
 
 class _LoadStandardizer(_Standardizer):
@@ -82,35 +83,40 @@ class _LoadStandardizer(_Standardizer):
         region_names = list(load.columns)
         source_names = raw_names or region_names
         uid = [f"figshare:{name}" for name in source_names]
+        spatial = self.manager.load("spatial").set_index("name")
+        missing_locations = set(region_names).difference(spatial.index)
+        if missing_locations:
+            raise ValueError(
+                "Load locations are missing from spatial data: "
+                f"{sorted(missing_locations)}"
+            )
+        geometry = spatial.loc[region_names].geometry.to_wkt().to_numpy()
         dataset = xr.Dataset(
             {
                 "demand_mw": (
-                    ("time", "uid"),
-                    load.to_numpy(dtype="float32") * 1000,
+                    ("time", "uid", "class"),
+                    load.to_numpy(dtype="float32")[:, :, None] * 1000,
                 )
             },
             coords={
                 "time": load.index.to_numpy(),
                 "uid": uid,
-                "region_name": ("uid", region_names),
-                "source_region_name": ("uid", source_names),
-                "type": ("uid", ["electric_load"] * len(uid)),
-                "technology": ("uid", ["aggregate"] * len(uid)),
-                "status": ("uid", ["historical"] * len(uid)),
-                "source_id": ("uid", [source_id] * len(uid)),
+                "class": ["electric_load"],
+                "location": ("uid", region_names),
+                "geometry": ("uid", geometry),
+                "geometry_method": (
+                    "uid", ["inferred_from_spatial_unit"] * len(uid)
+                ),
             },
             attrs={
+                "standard_dataset_id": self.dataset_id,
                 "timezone": self.options["timezone"],
                 "time_step": self.options["interval"],
-                "time_reference": self.options["time_reference"],
                 "source_unit": "GWh per hourly interval",
                 "unit": "MW",
+                "source_id": source_id,
+                "crs": spatial.crs.to_string(),
             },
         )
-        path = self.output()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        dataset.to_netcdf(
-            path,
-            encoding={"demand_mw": {"zlib": True, "complevel": 4}},
-        )
+        _write_xarray(dataset, self.output(), "demand_mw")
         return dataset

@@ -38,10 +38,17 @@ conda activate env-py313
 - `test_layers.ipynb`：分层模块的可执行接口示例。
 - `data/`、`config/`、`templates/`、`outputs/`：输入、配置、模板和结果。
 
+`config/raw_data_sources.csv`中的`local_path`是下载前确定的`data/`内规范路径；
+自动下载始终直接保存到该路径。`remote_file_name`记录上游原始文件名。对于手动
+下载或已按原名保存的文件，可先放在`data/`或规范路径所在目录，再运行
+`RawDataManager.prepare(source_id)`；若只发现一个同名候选，manager仅调整其
+路径和文件名，不改动文件内容。`check()`以`local_path_mismatch`报告尚未归档的
+文件；发现多个候选时不会自动选择。
+
 ## 标准数据层
 
 `config/standard_data.toml`记录dataset与source依赖、预处理脚本和可调流程参数；
-`config/asset_type_mapping.csv`集中记录GEM/DOE到标准`type/technology`的有序
+`config/class_mapping.csv`集中记录GEM/DOE到标准`class/subclass`的有序
 映射规则。公共
 dataset ID固定为`spatial`、`network`、`generation`、`storage`、
 `parameter`、`load`、`population`和`resource`。
@@ -53,7 +60,20 @@ standard_data = StandardDataManager()
 standard_data.check()
 generation = standard_data.build("generation")
 network = standard_data.load("network")
+generation_schema = generation.schema
+network_schema = network.schema
+selected_schemas = standard_data.schema(["generation", "storage"])
+all_available_schemas = standard_data.schema()
 ```
+
+`schema(dataset_ids)`读取指定的一项或多项真实标准输出，`schema()`汇总所有当前
+已生成的dataset。加载后的pandas/GeoPandas/xarray对象及`NetworkData`可直接通过
+`.schema`查看。返回表格直接列出真实输出的DataFrame列，或xarray的dimensions、
+coordinates、data variables和attributes，并以`required`和`description`标记
+`schema.py`规定的必要内容；schema不会用上游定义虚构实际输出中不存在的字段。
+每个处理器还会把自身稳定的dataset ID写入输出属性
+`standard_dataset_id`；GeoParquet将其保存在文件元数据中，NetCDF将其保存在
+dataset attributes中。Manager只读取和校验，不在加载阶段补写。
 
 实体dataset使用GeoParquet；`network`返回包含`nodes`和`branches`的
 `NetworkData`；`parameter`使用Parquet；连续时空数据使用xarray和NetCDF。
@@ -67,8 +87,9 @@ network = standard_data.load("network")
 | `storage.parquet` | 储能设备GeoDataFrame |
 | `spatial.parquet` | 行政区等空间单元GeoDataFrame |
 | `parameter.parquet` | 长表形式的技术经济参数 |
-| `load.nc` | `time × uid`逐时负荷 |
-| `population.nc` | `y × x`人口栅格 |
+| `load.nc` | `time × uid × class`逐时负荷 |
+| `population.parquet` | 可配置源像元聚合尺度的人口网格GeoDataFrame |
+| `resource.nc` | `time × uid × class`风光水资源可用率 |
 
 推荐通过`StandardDataManager.load(dataset_id)`读取：它会选择正确的读取器，并把
 两个network文件恢复为一个`NetworkData`对象。Parquet/NetCDF也可以由
@@ -87,12 +108,13 @@ generation = gpd.read_parquet(
 
 标准`network`不设置最低电压阈值，只要求line/cable具备可解析的电压；算例所需的
 220 kV、500 kV等阈值应在后续system-case层选择。原始PBF更新或GPKG缺失时，
-manager根据TOML调用`prepare_osm_power_network.sh`重建派生文件。
+manager根据TOML调用`prepare_osm_power_network.sh`重建派生文件；GPKG路径由
+`feature_output_prefix + ".gpkg"`唯一确定。
 
 分类规则按`source`分组并按`priority`升序执行，第一条匹配规则生效。新增
-`type/technology`时，在`asset_type_mapping.csv`中增加一条具有唯一`rule_id`
+`class/subclass`时，在`class_mapping.csv`中增加一条具有唯一`rule_id`
 和优先级的具体规则，并放在该来源的fallback规则之前；无需修改Python。输出中的
-`classification_rule_id`可反查命中规则，`technology_raw`、`fuel_raw`等字段用于
+`mapping_rule_id`可反查命中规则，`technology`、`fuel_raw`等原始字段用于
 抽样复核；fallback记录应作为人工校验重点。
 
 ## OSM电网拓扑
@@ -110,7 +132,9 @@ data/osm/china-latest.osm.pbf
 
 ```bash
 cd paper-codes
-./prepare_osm_power_network.sh
+./prepare_osm_power_network.sh \
+  data/osm/china-latest.osm.pbf \
+  data/osm/china-power-network
 ```
 
 `osm_exp.ipynb` 当前读取 `china-power-network.gpkg/power_features`，线路阈值为

@@ -17,8 +17,8 @@ class _GemMixin:
         "technology_pattern",
         "fuel_pattern",
         "dataset",
-        "type",
-        "technology",
+        "class",
+        "subclass",
     }
 
     @classmethod
@@ -36,8 +36,8 @@ class _GemMixin:
             )
         if not rules["dataset"].isin({"generation", "storage"}).all():
             raise ValueError("Asset mapping dataset must be generation or storage.")
-        if rules["type"].eq("").any():
-            raise ValueError("Asset mapping type values must be present.")
+        if rules["class"].eq("").any():
+            raise ValueError("Asset mapping class values must be present.")
         for column in (
             "source_type_pattern",
             "technology_pattern",
@@ -81,9 +81,9 @@ class _GemMixin:
         result = pd.DataFrame(
             {
                 "dataset": pd.Series(pd.NA, index=frame.index, dtype="string"),
-                "type": pd.Series(pd.NA, index=frame.index, dtype="string"),
-                "technology": pd.Series(pd.NA, index=frame.index, dtype="string"),
-                "classification_rule_id": pd.Series(
+                "class": pd.Series(pd.NA, index=frame.index, dtype="string"),
+                "subclass": pd.Series(pd.NA, index=frame.index, dtype="string"),
+                "mapping_rule_id": pd.Series(
                     pd.NA, index=frame.index, dtype="string"
                 ),
             }
@@ -91,24 +91,26 @@ class _GemMixin:
         source_type = frame["Type"].fillna("").astype(str)
         technology = frame["Technology"].fillna("").astype(str)
         fuel = frame["Fuel (combustion only)"].fillna("").astype(str)
-        for rule in rules.itertuples():
+        for _, rule in rules.iterrows():
             unmatched = result["dataset"].isna()
             mask = (
                 unmatched
                 & source_type.str.contains(
-                    rule.source_type_pattern or ".*", case=False, regex=True
+                    rule["source_type_pattern"] or ".*", case=False, regex=True
                 )
                 & technology.str.contains(
-                    rule.technology_pattern or ".*", case=False, regex=True
+                    rule["technology_pattern"] or ".*", case=False, regex=True
                 )
                 & fuel.str.contains(
-                    rule.fuel_pattern or ".*", case=False, regex=True
+                    rule["fuel_pattern"] or ".*", case=False, regex=True
                 )
             )
-            result.loc[mask, ["dataset", "type"]] = [rule.dataset, rule.type]
-            result.loc[mask, "classification_rule_id"] = rule.rule_id
-            if rule.technology:
-                result.loc[mask, "technology"] = rule.technology
+            result.loc[mask, ["dataset", "class"]] = [
+                rule["dataset"], rule["class"]
+            ]
+            result.loc[mask, "mapping_rule_id"] = rule["rule_id"]
+            if rule["subclass"]:
+                result.loc[mask, "subclass"] = rule["subclass"]
         return result
 
     @staticmethod

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import xarray as xr
 
 from .base import _Standardizer
+from .schema import _write_xarray
 
 
 class _ResourceStandardizer(_Standardizer):
@@ -30,39 +32,59 @@ class _ResourceStandardizer(_Standardizer):
             ),
         }
         runoff = cutout.data["runoff"].clip(min=0)
-        for technology, window, mean in (
+        for subclass, window, mean in (
             ("run_of_river", 24, self.options["run_of_river_mean_pu"]),
             ("reservoir", 168, self.options["reservoir_mean_pu"]),
         ):
-            profile = runoff.rolling(
-                time=window, min_periods=1, center=True
-            ).mean()
-            variables[technology] = (
+            profile = runoff.rolling(time=window, min_periods=1, center=True).mean()
+            variables[subclass] = (
                 profile / profile.mean("time").where(profile.mean("time") > 0) * mean
             ).clip(0, 1).fillna(0)
+
         availability = xr.concat(
             list(variables.values()),
-            dim=pd.Index(list(variables), name="technology"),
-        ).astype("float32")
+            dim=pd.Index(list(variables), name="class"),
+        ).transpose("time", "y", "x", "class")
+        y, x = np.meshgrid(availability["y"].values, availability["x"].values, indexing="ij")
+        uid = [
+            f"{source_id}:{row}:{column}"
+            for row in range(availability.sizes["y"])
+            for column in range(availability.sizes["x"])
+        ]
         dataset = xr.Dataset(
-            {"availability_pu": availability},
-            coords={
-                "type": (
-                    "technology",
-                    ["wind", "wind", "solar", "hydropower", "hydropower"],
+            {
+                "availability_pu": (
+                    ("time", "uid", "class"),
+                    availability.data.reshape(
+                        availability.sizes["time"], len(uid), len(variables)
+                    ).astype("float32"),
                 )
             },
+            coords={
+                "time": availability["time"].values,
+                "uid": uid,
+                "class": list(variables),
+                "location": (
+                    "uid",
+                    [f"{latitude:.6f},{longitude:.6f}" for latitude, longitude in zip(y.ravel(), x.ravel(), strict=True)],
+                ),
+                "geometry": (
+                    "uid",
+                    [f"POINT ({longitude:.6f} {latitude:.6f})" for latitude, longitude in zip(y.ravel(), x.ravel(), strict=True)],
+                ),
+                "geometry_method": (
+                    "uid", ["source_grid_centroid"] * len(uid)
+                ),
+            },
             attrs={
-                "source_id": source_id,
-                "unit": "p.u.",
+                "standard_dataset_id": self.dataset_id,
                 "timezone": "UTC",
-                "time_reference": "interval_start",
+                "time_step": self.options.get("time_step", "1h"),
+                "source_unit": "ERA5 meteorological fields",
+                "unit": "p.u.",
+                "source_id": source_id,
+                "crs": "EPSG:4326",
             },
         )
-        path = self.output()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        dataset.to_netcdf(
-            path,
-            encoding={"availability_pu": {"zlib": True, "complevel": 4}},
-        )
+        _write_xarray(dataset, self.output(), "availability_pu")
         return dataset

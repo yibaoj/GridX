@@ -12,7 +12,7 @@ from shapely.geometry import Point
 from .asset_mapping import _GemMixin
 from .base import _Standardizer
 from .schema import (
-    _finalize_entities,
+    _finalize_frame,
     _numeric,
     _partial_time,
     _points,
@@ -26,24 +26,14 @@ class _StorageStandardizer(_Standardizer, _GemMixin):
         gem_source, doe_source = self.config["source_ids"]
         rows = self._gem_storage(gem_source)
         rows.extend(self._doe_storage(doe_source))
-        result = _finalize_entities(
+        result = _finalize_frame(
             pd.DataFrame(rows),
-            extra_columns=(
-                "name",
-                "power_capacity_mw",
-                "energy_capacity_mwh",
-                "duration_h",
-                "source_province",
-                "source_city",
-                "technology_raw",
-                "classification_rule_id",
-            ),
+            schema_id="storage",
             string_columns=(
                 "name",
                 "source_province",
                 "source_city",
-                "technology_raw",
-                "classification_rule_id",
+                "technology",
             ),
         )
         for column in ("power_capacity_mw", "energy_capacity_mwh", "duration_h"):
@@ -61,7 +51,7 @@ class _StorageStandardizer(_Standardizer, _GemMixin):
             frame = frame[frame["Status"].isin(statuses)].copy()
         classification = self._classify_gem(
             frame,
-            self.manager.project_root / self.options["asset_mapping_file"],
+            self.manager.project_root / self.options["class_mapping_file"],
         )
         frame = frame.loc[classification["dataset"].eq("storage")].copy()
         classification = classification.loc[frame.index]
@@ -71,31 +61,31 @@ class _StorageStandardizer(_Standardizer, _GemMixin):
         return [
             {
                 "uid": f"gem:{row['GEM unit/phase ID']}",
-                "type": classification.loc[index, "type"],
-                "technology": classification.loc[index, "technology"],
+                "class": classification.loc[index, "class"],
+                "subclass": classification.loc[index, "subclass"],
                 "status": _snake_case(row["Status"]),
+                "power_capacity_mw": _numeric(row["Capacity (MW)"]),
+                "energy_capacity_mwh": pd.NA,
+                "duration_h": pd.NA,
                 "voltage_kv": None,
-                "valid_from": _partial_time(row.get("Start year")),
-                "valid_to": _partial_time(row.get("Retired year")),
-                "observed_at": self.options.get("gem_observed_at"),
-                "source_id": source_id,
-                "source_record_id": row["GEM unit/phase ID"],
+                "geometry": geometries[position],
                 "geometry_method": (
                     "source_coordinates"
                     if geometries[position] is not None
                     else pd.NA
                 ),
+                "observed_at": self.options.get("gem_observed_at"),
+                "valid_from": _partial_time(row.get("Start year")),
+                "valid_to": _partial_time(row.get("Retired year")),
+                "source_id": source_id,
+                "source_uid": row["GEM unit/phase ID"],
+                "mapping_rule_id": classification.loc[index, "mapping_rule_id"],
                 "name": row["Plant / Project name"],
-                "power_capacity_mw": _numeric(row["Capacity (MW)"]),
-                "energy_capacity_mwh": pd.NA,
-                "duration_h": pd.NA,
                 "source_province": row.get("Subnational unit (state, province)"),
                 "source_city": row.get("City"),
-                "technology_raw": row["Technology"],
-                "classification_rule_id": classification.loc[
-                    index, "classification_rule_id"
-                ],
-                "geometry": geometries[position],
+                "longitude": longitude.loc[index],
+                "latitude": latitude.loc[index],
+                "technology": row["Technology"],
             }
             for position, (index, row) in enumerate(frame.iterrows())
         ]
@@ -103,7 +93,7 @@ class _StorageStandardizer(_Standardizer, _GemMixin):
     def _doe_storage(self, source_id: str) -> list[dict[str, object]]:
         projects = json.loads(self.source(source_id).read_text())
         rules = self._mapping_rules(
-            self.manager.project_root / self.options["asset_mapping_file"],
+            self.manager.project_root / self.options["class_mapping_file"],
             "doe",
         )
         statuses = set(self.options.get("doe_statuses", []))
@@ -128,12 +118,12 @@ class _StorageStandardizer(_Standardizer, _GemMixin):
                 )
             ]
             rule = matched.iloc[0] if not matched.empty else None
-            storage_type = rule["type"] if rule is not None else "other_storage"
-            technology = (
-                rule["technology"] if rule is not None and rule["technology"] else pd.NA
+            storage_class = rule["class"] if rule is not None else "other_storage"
+            subclass = (
+                rule["subclass"] if rule is not None and rule["subclass"] else pd.NA
             )
             # GEM is the project-level pumped-hydro source to avoid double counting.
-            if storage_type == "pumped_storage":
+            if storage_class == "pumped_storage":
                 continue
             longitude = _numeric(project.get("Longitude"))
             latitude = _numeric(project.get("Latitude"))
@@ -148,17 +138,9 @@ class _StorageStandardizer(_Standardizer, _GemMixin):
             energy_mwh = energy / 1000 if pd.notna(energy) else pd.NA
             rows.append({
                 "uid": f"doe:{project.get('ID')}",
-                "type": storage_type,
-                "technology": technology,
+                "class": storage_class,
+                "subclass": subclass,
                 "status": _snake_case(project.get("Status")),
-                "voltage_kv": None,
-                "valid_from": pd.NA,
-                "valid_to": pd.NA,
-                "observed_at": self.options.get("doe_observed_at"),
-                "source_id": source_id,
-                "source_record_id": str(project.get("ID")),
-                "geometry_method": "source_coordinates" if geometry else pd.NA,
-                "name": project.get("Project/Plant Name"),
                 "power_capacity_mw": power_mw,
                 "energy_capacity_mwh": energy_mwh,
                 "duration_h": (
@@ -166,12 +148,20 @@ class _StorageStandardizer(_Standardizer, _GemMixin):
                     if pd.notna(energy_mwh) and pd.notna(power_mw) and power_mw > 0
                     else pd.NA
                 ),
+                "voltage_kv": None,
+                "geometry": geometry,
+                "geometry_method": "source_coordinates" if geometry else pd.NA,
+                "observed_at": self.options.get("doe_observed_at"),
+                "valid_from": pd.NA,
+                "valid_to": pd.NA,
+                "source_id": source_id,
+                "source_uid": str(project.get("ID")),
+                "mapping_rule_id": rule["rule_id"] if rule is not None else pd.NA,
+                "name": project.get("Project/Plant Name"),
                 "source_province": project.get("State/Province"),
                 "source_city": project.get("City"),
-                "technology_raw": raw_technology or pd.NA,
-                "classification_rule_id": (
-                    rule["rule_id"] if rule is not None else pd.NA
-                ),
-                "geometry": geometry,
+                "longitude": longitude,
+                "latitude": latitude,
+                "technology": raw_technology or pd.NA,
             })
         return rows
