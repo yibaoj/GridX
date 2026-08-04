@@ -13,6 +13,10 @@ pypsa==1.2.4
 linopy==0.7.0
 highspy==1.13.1
 xarray==2026.4.0
+dask==2026.6.0
+scipy==1.18.0
 netCDF4==1.7.4
 atlite==0.4.1
 cdsapi==0.7.7
+cfgrib==0.9.15.1
+eccodes==2.46.0

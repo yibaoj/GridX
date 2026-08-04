@@ -35,6 +35,8 @@ conda activate env-py313
 - `prepare_osm_power_network.sh`：从OSM PBF提取电力设施并生成GeoPackage。
 - `src/raw/`：按稳定 `source_id` 下载、检查和定位原始数据。
 - `src/standard/`：按dataset拆分的标准数据包，统一字段、单位和格式。
+- `src/mapping/`：统一空间单元、时间轴及电气节点映射。
+- `src/web/`：面向standard/mapping结果的本地交互式数据网站。
 - `test_layers.ipynb`：分层模块的可执行接口示例。
 - `data/`、`config/`、`templates/`、`outputs/`：输入、配置、模板和结果。
 
@@ -44,6 +46,30 @@ conda activate env-py313
 `RawDataManager.prepare(source_id)`；若只发现一个同名候选，manager仅调整其
 路径和文件名，不改动文件内容。`check()`以`local_path_mismatch`报告尚未归档的
 文件；发现多个候选时不会自动选择。
+
+风光资源的raw输入使用CDS的ERA5逐小时单层再分析数据。目录中的
+`era5_china_2024`配置覆盖中国区域（73-136 E、18-54 N）和2024年全部8784个
+小时，通过atlite按月串行请求`wind`、`influx`、`temperature`和`runoff`特征，
+写入`data/capacity-factors/era5_china_2024.nc`。运行前须在CDS网页接受ERA5
+许可并配置`~/.cdsapirc`。ERA5原始时间使用UTC；时区统一留给后续时空映射层。
+随后执行：
+
+```bash
+conda install -n env-py313 -c conda-forge cfgrib eccodes
+```
+
+```python
+from src.raw import RawDataManager
+
+raw_data = RawDataManager()
+raw_data.check("era5_china_2024")
+era5_report = raw_data.prepare("era5_china_2024")
+```
+
+下载完成后raw层校验特征、逐小时时间轴和经纬度覆盖范围；容量因子转换仍由
+后续`resource`标准化流程负责。其中`runoff`服务于现有水电可用率流程，并非
+风电或光伏计算的必要输入。修改年份、范围或特征时，只修改
+`config/raw_data_sources.csv`中该source的`options_json`。
 
 ## 标准数据层
 
@@ -66,14 +92,55 @@ selected_schemas = standard_data.schema(["generation", "storage"])
 all_available_schemas = standard_data.schema()
 ```
 
+`standard_data.plot(dataset_id)`返回质量检查图但不写文件。spatial展示陆地与海洋边界；
+population使用连续色带；generation与storage按原始点位绘制，以颜色和marker区分
+一级class、点大小表示容量，并分别给出class和容量尺度图例；network展示全部标准
+nodes和branches。load与resource
+按class分别绘图：不传`class_name`时返回`{class: Figure}`，传入后返回单个Figure。
+parameter没有空间字段，因此保留参数覆盖矩阵，不虚构地理位置。地图在绘制阶段统一
+转换到中国Albers等面积米制投影，保证距离比例正确，并使mapping层未裁剪的规则cell
+显示为正方形；该操作不修改标准数据自身的存储CRS。plot接口只返回Figure，不主动
+调用`display()`；notebook应显式执行`display(figure)`并随后`plt.close(figure)`。
+
+```python
+generation_figure = standard_data.plot("generation")
+load_figures = standard_data.plot("load", year=2024)
+onshore_figure = standard_data.plot(
+    "resource", year=2024, class_name="onshore"
+)
+```
+
+所有地图接口都接受`map_crs`。默认值为生成规则cell时使用的中国Albers等面积米制
+投影；使用相同投影可使未裁剪的50 km cell保持正方形。完整中国省级spatial会自动
+把南海诸岛放入右下角插图；`china_inset=False`可关闭。该插图判定依赖全国覆盖范围
+和中国省级adcode，省级子集及其他国家或地区不会触发。
+
+```python
+china_aea = (
+    "+proj=aea +lat_1=25 +lat_2=47 +lat_0=0 +lon_0=105 "
+    "+datum=WGS84 +units=m +no_defs"
+)
+figure = standard_data.plot("spatial", map_crs=china_aea)
+
+china_lambert = (
+    "+proj=lcc +lat_1=25 +lat_2=47 +lat_0=0 +lon_0=105 "
+    "+datum=WGS84 +units=m +no_defs"
+)
+figure = standard_data.plot("network", map_crs=china_lambert)
+
+figure_without_inset = standard_data.plot("spatial", china_inset=False)
+```
+
 `schema(dataset_ids)`读取指定的一项或多项真实标准输出，`schema()`汇总所有当前
 已生成的dataset。加载后的pandas/GeoPandas/xarray对象及`NetworkData`可直接通过
 `.schema`查看。返回表格直接列出真实输出的DataFrame列，或xarray的dimensions、
 coordinates、data variables和attributes，并以`required`和`description`标记
 `schema.py`规定的必要内容；schema不会用上游定义虚构实际输出中不存在的字段。
-每个处理器还会把自身稳定的dataset ID写入输出属性
-`standard_dataset_id`；GeoParquet将其保存在文件元数据中，NetCDF将其保存在
-dataset attributes中。Manager只读取和校验，不在加载阶段补写。
+所有标准dataset都必须具有`standard_dataset_id`和`crs`两个dataset级属性，
+分别标识稳定的标准数据集类型及geometry采用的坐标参考系；它们不是逐行重复的列。
+GeoDataFrame使用GeoParquet原生CRS和文件元数据，parameter将两项写入Parquet
+元数据，xarray将两项写入NetCDF dataset attributes。Manager只读取和校验，
+不在加载阶段补写。
 
 实体dataset使用GeoParquet；`network`返回包含`nodes`和`branches`的
 `NetworkData`；`parameter`使用Parquet；连续时空数据使用xarray和NetCDF。
@@ -90,6 +157,23 @@ dataset attributes中。Manager只读取和校验，不在加载阶段补写。
 | `load.nc` | `time × uid × class`逐时负荷 |
 | `population.parquet` | 可配置源像元聚合尺度的人口网格GeoDataFrame |
 | `resource.nc` | `time × uid × class`风光水资源可用率 |
+
+`resource.nc`保留ERA5原始0.25度网格和UTC逐小时时间轴，`class`取值为
+`onshore`、`offshore_fixed`、`utility_scale_pv`和`run_of_river`。
+风电采用atlite的对数风廓线与NREL 5.5 MW陆上/15 MW海上风机功率曲线；光伏采用
+最优固定倾角、增强Reindl辐照度分解和Huld晶硅组件模型；径流式水电采用24小时
+平滑的ERA5局地径流，扣除年均径流10%的生态流量，并以可用径流75%分位数作为
+设计流量。所有结果裁剪至`[0, 1] p.u.`。水电结果尚未考虑HydroBASINS上游汇流、
+河道传播、电站水头和实测流量校准，因此是网格级径流式资源代理，不是电站级
+可发电量。模型和参数均在`config/standard_data.toml`中可追溯、可修改。
+
+```python
+from src.standard import StandardDataManager
+
+standard_data = StandardDataManager()
+resource = standard_data.build("resource")
+resource_schema = resource.schema
+```
 
 推荐通过`StandardDataManager.load(dataset_id)`读取：它会选择正确的读取器，并把
 两个network文件恢复为一个`NetworkData`对象。Parquet/NetCDF也可以由
@@ -116,6 +200,93 @@ manager根据TOML调用`prepare_osm_power_network.sh`重建派生文件；GPKG�
 和优先级的具体规则，并放在该来源的fallback规则之前；无需修改Python。输出中的
 `mapping_rule_id`可反查命中规则，`technology`、`fuel_raw`等原始字段用于
 抽样复核；fallback记录应作为人工校验重点。
+
+## 时空映射层
+
+`config/mapping.toml`控制标准空间单元、空间边界裁剪、时区、空间重映射和节点匹配。
+默认生成50 km正方形，并按`level_priority = ["province", "marine_zone"]`选择空间单元
+及确定冲突优先级；不足5 km²的碎片只在相同`admin_uid`内并入中心最近的单元。
+列表越靠前优先级越高，后续level会扣除与前序level的重叠区域。同一level内部不做
+任意优先级裁切，新增来源前应先检查其内部及同级重叠。standard spatial使用`level`，
+全部mapping输出统一使用`spatial_level`。
+`kind="polygon"`和`polygon_file`可改用外部多边形单元；改用city时，standard spatial
+必须先包含`level="city"`记录。
+
+`spatial`可依赖多个raw source。每个源在`raw_data_sources.csv`的`options_json`中声明
+`spatial_level`和`source_uid_field`，standardizer据此生成`level`；单个源包含多种
+level时可改用`spatial_level_field`指定原始列，不会根据文件名或几何位置猜测。
+当前`marine_zone`来自World Bank/ESMAP东亚与太平洋海上风电技术潜力
+数据中`ISO_Ter1=CHN`的固定式、漂浮式区域并集；它是资源评估空间域，不代表法定领海
+或主权边界。若取得正式海洋功能区或海上风电规划GIS，只需增加一个配置了
+`spatial_level="marine_zone"`的新raw source，无需修改standardizer。
+
+```python
+from src.mapping import SpatiotemporalMappingManager
+from src.standard import StandardDataManager
+
+standard_data = StandardDataManager()
+mapping = SpatiotemporalMappingManager(
+    "config/mapping.toml",
+    standard_data,
+)
+spatial = mapping.build_cells()
+connected_network = mapping.build_network()
+mapped_data = mapping.build()
+mapping.check()
+
+# Load one product without opening all mapping outputs.
+generation = mapping.load("generation")
+generation[["uid", "spatial_uid", "node_uid", "node_distance_km"]]
+
+# Inspect schemas from materialized outputs.
+mapping.schema(["generation", "network"])
+generation.schema
+```
+
+`build_network()`只根据标准network的`from_uid/to_uid`返回最大连通子图，不依赖
+空间单元。完整`build()`内部会依次调用`build_cells()`和`build_network()`，随后才
+把连通网络的nodes映射到空间单元，并写出全部派生结果。`build()`与无参数`load()`都
+返回同一结构的`MappingData`；前者重新计算并写盘，后者只从已有文件恢复。
+公开的mapping ID与standard dataset命名一致，即`spatial`、`population`、`load`、
+`resource`、`network`、`generation`和`storage`。通过容器名称区分数据阶段，例如
+`standard_spatial = standard_data.load("spatial")`和
+`mapped_spatial = mapped_data.spatial`。generation和storage直接在GeoDataFrame中
+增加空间单元及节点映射列，load则增加沿`uid`定义的节点映射coordinates。network
+组合最大连通网络的nodes、branches及支路到空间单元的多对多映射。
+
+resource默认按其原始像元与全部standard cell的几何交集进行强度型面积加权，不在
+映射层按resource class设置陆海掩膜；输出保留`spatial_level`，算例层仍需按设备类别
+选择相容空间域（例如offshore wind使用`marine_zone`）。原始ERA5目前南界为18°N，
+海洋区中18°N以南的cell会保持缺失值，除非扩大ERA5下载范围后重建resource。
+
+负荷采用空间守恒映射：细源像元按相交面积升尺度，粗源区域默认按映射后人口权重
+拆分，且每个源区域权重重新归一化。`spatial_mapping.load.method="linear"`按面积
+拆分；`method="auxiliary"`时，由`auxiliary_dataset`选择standard dataset，并由
+`auxiliary_value`选择其中的数值列。`auxiliary_must_be_finer`控制辅助源是否必须比
+标准空间单元更细。
+resource是intensive量，按源/目标面重叠面积加权。这里的`linear`表示面域线性权重，
+不是对中心点做双线性插值。所有时序转换到配置时区，但不自动裁剪共同年份。
+
+network先按`from_uid`和`to_uid`提取并验证最大连通子图。nodes、generation和
+storage得到单一`spatial_uid`；跨越多个空间单元的branches保存在显式many-to-many
+crosswalk中。资产与负荷可分别配置`geometry`或`cell`节点匹配方式，默认只
+匹配station，并保留距离、两端admin UID和`node_same_admin`供质量检查。全部派生结果
+写入`outputs/mapping/`，不会覆盖standard datasets。
+
+mapping层采用与standard层完全相同的`plot(mapping_id, ...)`接口、浅灰中国底图、
+class配色和连续色带。spatial展示裁剪后的cell边界；population、load和resource
+展示cell值；generation与storage在cell中心绘制容量缩放的class占比饼图；network
+展示最大连通子图，并高亮与nodes和branches关联的cells。连续色标统一放在左侧；
+generation与storage同时展示class颜色图例和总容量圆圈尺度图例。
+
+```python
+mapped_generation_figure = mapping.plot("generation")
+mapped_load_figures = mapping.plot("load", year=2024)
+mapped_pv_figure = mapping.plot(
+    "resource", year=2024, class_name="utility_scale_pv"
+)
+mapped_network_figure = mapping.plot("network")
+```
 
 ## OSM电网拓扑
 
@@ -219,7 +390,7 @@ GEM类型进一步把光伏与`solar_thermal`、陆上与`offshore_wind`分开�
 约30 km网格，再将每个网格分配到同省最近的、位于最大连通图且已匹配省份的
 station node；变电站省份及经纬度直接复用`osm_exp.ipynb`的结果。
 
-核心对象为`provincial_hourly_load`、`grid_load_weights_gdf`、
+核心对象为`provincial_hourly_load`、`cell_load_weights_gdf`、
 `station_load_weights`和`station_hourly_load`。输出包括网格映射GeoPackage、
 静态节点权重CSV、逐时节点负荷Parquet，以及北京、山东、浙江和新疆的省级原始
 负荷与站点堆叠负荷对比图。省内人口权重及全国逐时总量均做守恒检查。人口比例法
@@ -258,6 +429,20 @@ generators和108个storage units，HiGHS返回optimal。日负荷30,217.94 GWh�
 - `outputs/uc_dispatch_by_type_2024-08-01.csv`
 - `outputs/uc_commitment_status_2024-08-01.csv`
 - `outputs/uc_dispatch_2024-08-01.png`
+
+## 数据网站
+
+`src/web/`使用只读Python数据接口和Leaflet地图展示mapping结果，不复制或修改
+标准数据。图层、默认视角、500 kV网络筛选阈值和右侧更新流集中配置于
+`config/web.toml`。启动命令为：
+
+```bash
+conda run -n env-py313 python -m src.web.app
+```
+
+浏览器访问`http://127.0.0.1:8765`。当前图层包括空间单元、人口、发电、储能和
+高压网络；发电与储能在服务端按`spatial_uid`聚合后传输，避免浏览器加载全部原始
+对象。
 
 ## 环境与参考
 

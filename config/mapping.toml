@@ -1,0 +1,51 @@
+[general]
+output_root = "outputs/mapping"
+metric_crs = "+proj=aea +lat_1=25 +lat_2=47 +lat_0=0 +lon_0=105 +datum=WGS84 +units=m +no_defs"
+timezone = "Asia/Shanghai"
+time_step = "1h"
+random_seed = 42
+
+[cell]
+kind = "square"
+size_km = 50.0
+polygon_file = ""
+level_priority = ["province", "marine_zone"]
+minimum_area_km2 = 5.0
+
+[spatial_mapping.load]
+method = "auxiliary"
+auxiliary_dataset = "population"
+auxiliary_value = "population"
+auxiliary_must_be_finer = true
+conservation_tolerance = 0.005
+
+[spatial_mapping.resource]
+method = "linear"
+source_cell_width_degrees = 0.25
+source_cell_height_degrees = 0.25
+
+[network]
+node_classes = ["station"]
+
+[asset_node_mapping]
+generation_method = "geometry"
+storage_method = "geometry"
+prefer_same_admin = true
+
+[load_node_mapping]
+method = "geometry"
+prefer_same_admin = true
+
+[outputs]
+spatial = "spatial.parquet"
+population = "population.parquet"
+load = "load.nc"
+resource = "resource.nc"
+network_nodes = "network_nodes.parquet"
+network_branches = "network_branches.parquet"
+network_branch_cells = "network_branch_cells.parquet"
+generation = "generation.parquet"
+storage = "storage.parquet"
+generation_node = "generation_node_mapping.parquet"
+storage_node = "storage_node_mapping.parquet"
+load_node = "load_node_mapping.parquet"

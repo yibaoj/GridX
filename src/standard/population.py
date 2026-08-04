@@ -1,4 +1,4 @@
-"""Population-grid standardization."""
+"""Population-cell standardization."""
 
 from __future__ import annotations
 
@@ -45,10 +45,10 @@ class _PopulationStandardizer(_Standardizer):
                 left, bottom, right, top = bounds(window, raster.transform)
                 records.append({
                     "uid": f"{source_id}:{row_start}:{column_start}",
-                    "class": "gridded_population",
+                    "class": "cell_population",
                     "population": float(population[row, column]),
                     "geometry": box(left, bottom, right, top),
-                    "geometry_method": "aggregated_source_grid",
+                    "geometry_method": "aggregated_source_cell",
                     "observed_at": self.options.get("observed_at", pd.NA),
                     "valid_from": self.options.get("valid_from", pd.NA),
                     "valid_to": self.options.get("valid_to", pd.NA),

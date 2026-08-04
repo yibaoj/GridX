@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path
+import warnings
 
 import pandas as pd
 
@@ -50,11 +51,19 @@ class RawDataManager:
             file_checksum = (
                 checksum(checked_path, source) if checked_path is not None else ""
             )
+            validation_error = ""
+            if checked_path is not None:
+                try:
+                    self._downloader.validate(source, checked_path)
+                except Exception as error:
+                    validation_error = str(error)
             checksum_ok = (
                 not source.get("expected_checksum")
                 or file_checksum.lower() == source["expected_checksum"].lower()
             )
-            if exists and checksum_ok:
+            if checked_path is not None and validation_error:
+                status = "invalid_source_file"
+            elif exists and checksum_ok:
                 status = "available"
             elif exists:
                 status = "checksum_mismatch"
@@ -68,7 +77,7 @@ class RawDataManager:
                 status = "manual_action_required"
             elif (
                 source["acquisition_method"] == "atlite_cds"
-                and not (Path.home() / ".cdsapirc").exists()
+                and not self._downloader.cds_credentials_available()
             ):
                 status = "credentials_required"
             else:
@@ -93,6 +102,7 @@ class RawDataManager:
                         else pd.NA
                     ),
                     "checksum": file_checksum,
+                    "validation_error": validation_error or pd.NA,
                     "status": status,
                     "download_instructions": source["download_instructions"],
                 }
@@ -148,9 +158,10 @@ class RawDataManager:
             if method == "manual":
                 actions[source_id] = "manual_action_required"
                 continue
-            if method == "atlite_cds" and not (
-                Path.home() / ".cdsapirc"
-            ).exists():
+            if (
+                method == "atlite_cds"
+                and not self._downloader.cds_credentials_available()
+            ):
                 actions[source_id] = "credentials_required"
                 continue
             try:
@@ -159,6 +170,11 @@ class RawDataManager:
             except Exception as error:
                 actions[source_id] = "download_failed"
                 errors[source_id] = str(error)
+                warnings.warn(
+                    f"{source_id} download failed: {error}",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
 
         report = self.check(selected.index)
         report["action"] = pd.Series(actions)

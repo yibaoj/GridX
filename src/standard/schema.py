@@ -29,6 +29,7 @@ DATASET_IDS = (
 
 __all__ = [
     "DATASET_IDS",
+    "REQUIRED_ATTRIBUTES",
     "REQUIRED_COLUMNS",
     "NetworkData",
     "time_bounds",
@@ -84,6 +85,11 @@ REQUIRED_COLUMNS = {
     ),
 }
 
+REQUIRED_ATTRIBUTES = {
+    schema_id: ("standard_dataset_id", "crs")
+    for schema_id in (*REQUIRED_COLUMNS, "load", "resource")
+}
+
 XARRAY_SCHEMAS = {
     "load": {
         "variable": "demand_mw",
@@ -92,8 +98,8 @@ XARRAY_SCHEMAS = {
             "time", "uid", "class", "location", "geometry", "geometry_method",
         ),
         "attributes": (
-            "standard_dataset_id", "timezone", "time_step", "source_unit",
-            "unit", "source_id", "crs",
+            *REQUIRED_ATTRIBUTES["load"], "timezone", "time_step",
+            "source_unit", "unit", "source_id",
         ),
     },
     "resource": {
@@ -103,8 +109,8 @@ XARRAY_SCHEMAS = {
             "time", "uid", "class", "location", "geometry", "geometry_method",
         ),
         "attributes": (
-            "standard_dataset_id", "timezone", "time_step", "source_unit",
-            "unit", "source_id", "crs",
+            *REQUIRED_ATTRIBUTES["resource"], "timezone", "time_step",
+            "source_unit", "unit", "source_id",
         ),
     },
 }
@@ -114,7 +120,7 @@ FIELD_DESCRIPTIONS = {
     "standard_dataset_id": "Stable identifier of the standardized dataset.",
     "class": "Primary standardized category.",
     "subclass": "More specific, extensible standardized category.",
-    "level": "Administrative level represented by the spatial unit.",
+    "level": "Spatial-unit level, such as province, city, or marine_zone.",
     "status": "Lifecycle or operating status.",
     "capacity_mw": "Installed generation capacity in MW.",
     "power_capacity_mw": "Storage charge/discharge power capacity in MW.",
@@ -147,6 +153,22 @@ FIELD_DESCRIPTIONS = {
     "crs": "Coordinate reference system used by geometry values.",
     "demand_mw": "Electrical demand in MW.",
     "availability_pu": "Resource availability per unit of installed capacity.",
+    "spatial_uid": "UID of the standard spatial cell.",
+    "spatial_level": "Level of the spatial unit used to clip the cell.",
+    "admin_uid": "UID of the spatial unit used to clip the cell.",
+    "centre_geometry": "Representative centre point of the standard cell.",
+    "area_km2": "Area of the clipped standard cell in square kilometres.",
+    "cell_kind": "Geometry family used to construct the standard cells.",
+    "source_cell_uid": "UID of the unclipped source cell.",
+    "cell_distance_km": "Distance used when assigning an object to a cell.",
+    "node_uid": "UID of the selected electrical-network node.",
+    "node_mapping_method": "Geometry- or cell-based node mapping method.",
+    "node_distance_km": "Distance from the source object to the selected node.",
+    "node_same_admin": "Whether the source object and node share an admin UID.",
+    "node_spatial_uid": "Standard-cell UID assigned to the selected node.",
+    "node_admin_uid": "Administrative UID assigned to the selected node.",
+    "mapping_dataset_id": "Stable mapped-data identifier.",
+    "in_largest_connected_graph": "Whether the object is in the retained network.",
 }
 
 VOLTAGE_DTYPE = pd.ArrowDtype(pa.list_(pa.float64()))
@@ -172,10 +194,10 @@ class NetworkData:
     branches: gpd.GeoDataFrame
 
     @property
-    def schema(self) -> pd.DataFrame:
-        """Describe the actual node and branch tables."""
+    def schema(self) -> "_SchemaAccessor":
+        """Return the schema accessor for the node and branch tables."""
 
-        return _dataset_schema(self)
+        return _SchemaAccessor(self)
 
 
 def _dataset_schema(data: object) -> pd.DataFrame:
@@ -214,6 +236,11 @@ def _frame_schema_rows(
     schema_id: str | None,
 ) -> list[dict[str, object]]:
     required = set(REQUIRED_COLUMNS.get(schema_id or "", ()))
+    required.update(frame.attrs.get("_schema_required_columns", ()))
+    required_attributes = set(REQUIRED_ATTRIBUTES.get(schema_id or "", ()))
+    required_attributes.update(
+        frame.attrs.get("_schema_required_attributes", ())
+    )
     rows = [{
         "component": component,
         "role": "dimension",
@@ -244,9 +271,9 @@ def _frame_schema_rows(
             "dimensions": pd.NA,
             "dtype": type(frame.crs).__name__,
             "size": pd.NA,
-            "required": False,
+            "required": "crs" in required_attributes,
             "description": FIELD_DESCRIPTIONS["crs"],
-            "value": str(frame.crs),
+            "value": frame.crs.to_string(),
         })
     rows.extend({
         "component": component,
@@ -255,10 +282,10 @@ def _frame_schema_rows(
         "dimensions": pd.NA,
         "dtype": type(value).__name__,
         "size": pd.NA,
-        "required": False,
-        "description": pd.NA,
+        "required": name in required_attributes,
+        "description": FIELD_DESCRIPTIONS.get(name, pd.NA),
         "value": value,
-    } for name, value in frame.attrs.items())
+    } for name, value in frame.attrs.items() if not name.startswith("_schema_"))
     return rows
 
 
@@ -268,6 +295,12 @@ def _xarray_schema_rows(data: xr.Dataset) -> list[dict[str, object]]:
     required_dimensions = set(schema.get("dimensions", ()))
     required_coordinates = set(schema.get("coordinates", ()))
     required_attributes = set(schema.get("attributes", ()))
+    required_coordinates.update(
+        data.attrs.get("_schema_required_coordinates", ())
+    )
+    required_attributes.update(
+        data.attrs.get("_schema_required_attributes", ())
+    )
     rows = [{
         "component": "data",
         "role": "dimension",
@@ -311,7 +344,7 @@ def _xarray_schema_rows(data: xr.Dataset) -> list[dict[str, object]]:
         "required": name in required_attributes,
         "description": FIELD_DESCRIPTIONS.get(name, pd.NA),
         "value": value,
-    } for name, value in data.attrs.items())
+    } for name, value in data.attrs.items() if not name.startswith("_schema_"))
     return rows
 
 
@@ -498,6 +531,8 @@ def _finalize_frame(
     ordered = [*required, *(column for column in result if column not in required)]
     result = result.loc[:, ordered]
     result.attrs["standard_dataset_id"] = schema_id.split(".", 1)[0]
+    if not isinstance(result, gpd.GeoDataFrame):
+        result.attrs["crs"] = crs
     _validate_frame(result, schema_id)
     return result
 
@@ -516,6 +551,13 @@ def _validate_frame(frame: pd.DataFrame, schema_id: str) -> None:
         raise ValueError(
             f"{schema_id}.attrs['standard_dataset_id'] must be {dataset_id!r}."
         )
+    frame_crs = (
+        frame.crs
+        if isinstance(frame, gpd.GeoDataFrame)
+        else frame.attrs.get("crs")
+    )
+    if frame_crs is None:
+        raise ValueError(f"{schema_id} must define a crs attribute.")
     if "geometry" in required and not isinstance(frame, gpd.GeoDataFrame):
         raise TypeError(f"{schema_id} must be a GeoDataFrame.")
     for column in _STRING_FIELDS.intersection(required):
@@ -608,7 +650,11 @@ def _read_geodataframe(path: Path) -> gpd.GeoDataFrame:
 def _write_dataframe(frame: pd.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_parquet(path, index=False)
-    _write_parquet_dataset_id(path, frame.attrs["standard_dataset_id"])
+    _write_parquet_attributes(
+        path,
+        standard_dataset_id=frame.attrs["standard_dataset_id"],
+        crs=frame.attrs["crs"],
+    )
 
 
 def _write_xarray(data: xr.Dataset, path: Path, variable: str) -> None:
@@ -624,18 +670,29 @@ def _write_xarray(data: xr.Dataset, path: Path, variable: str) -> None:
 def _read_dataframe(path: Path) -> pd.DataFrame:
     frame = pd.read_parquet(path, dtype_backend="pyarrow")
     frame.attrs["standard_dataset_id"] = _read_parquet_dataset_id(path)
+    frame.attrs["crs"] = _read_parquet_attribute(path, "crs")
     return frame
 
 
 def _write_parquet_dataset_id(path: Path, dataset_id: str) -> None:
+    _write_parquet_attributes(path, standard_dataset_id=dataset_id)
+
+
+def _write_parquet_attributes(path: Path, **attributes: object) -> None:
     table = pq.read_table(path)
     metadata = dict(table.schema.metadata or {})
-    metadata[b"standard_dataset_id"] = dataset_id.encode()
+    metadata.update(
+        {name.encode(): str(value).encode() for name, value in attributes.items()}
+    )
     pq.write_table(table.replace_schema_metadata(metadata), path)
 
 
 def _read_parquet_dataset_id(path: Path) -> str:
-    value = (pq.read_metadata(path).metadata or {}).get(b"standard_dataset_id")
+    return _read_parquet_attribute(path, "standard_dataset_id")
+
+
+def _read_parquet_attribute(path: Path, name: str) -> str:
+    value = (pq.read_metadata(path).metadata or {}).get(name.encode())
     if value is None:
-        raise ValueError(f"Parquet metadata has no standard_dataset_id: {path}")
+        raise ValueError(f"Parquet metadata has no {name}: {path}")
     return value.decode()

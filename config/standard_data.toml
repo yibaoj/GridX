@@ -4,7 +4,7 @@ canonical_crs = "EPSG:4326"
 
 [datasets.spatial]
 processor = "spatial"
-source_ids = ["province_boundaries"]
+source_ids = ["province_boundaries", "offshore_wind_potential_eap"]
 output = "spatial.parquet"
 
 [datasets.network]
@@ -85,11 +85,15 @@ source_ids = ["era5_china_2024"]
 output = "resource.nc"
 
 [datasets.resource.options]
-year = 2024
 time_step = "1h"
 onshore_turbine = "NREL_ReferenceTurbine_2020ATB_5.5MW"
 offshore_turbine = "NREL_ReferenceTurbine_2020ATB_15MW_offshore"
+wind_interpolation_method = "logarithmic"
+wind_smooth_power_curve = false
 solar_panel = "CSi"
 solar_orientation = "latitude_optimal"
-run_of_river_mean_pu = 0.45
-reservoir_mean_pu = 0.55
+solar_tracking = "none"
+solar_clearsky_model = "enhanced"
+run_of_river_smoothing_hours = 24
+run_of_river_design_quantile = 0.75
+run_of_river_environmental_flow_fraction = 0.10

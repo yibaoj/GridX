@@ -1,0 +1,73 @@
+[site]
+title = "中国电力系统数据观测"
+subtitle = "Spatial data workspace"
+
+[server]
+host = "127.0.0.1"
+port = 8765
+
+[data]
+mapping_config = "config/mapping.toml"
+network_min_voltage_kv = 500
+
+[map]
+center = [35.5, 104.0]
+zoom = 4
+min_zoom = 3
+max_zoom = 10
+tile_url = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+tile_attribution = "&copy; OpenStreetMap contributors &copy; CARTO"
+default_layer = "population"
+
+[[layers]]
+id = "spatial"
+label = "空间单元"
+description = "标准空间单元与行政归属"
+icon = "grid-2x2"
+unit = "cells"
+
+[[layers]]
+id = "population"
+label = "人口"
+description = "标准空间单元人口"
+icon = "users"
+unit = "people"
+
+[[layers]]
+id = "generation"
+label = "发电"
+description = "按空间单元聚合的装机"
+icon = "factory"
+unit = "MW"
+
+[[layers]]
+id = "storage"
+label = "储能"
+description = "按空间单元聚合的功率容量"
+icon = "battery-charging"
+unit = "MW"
+
+[[layers]]
+id = "network"
+label = "输电网络"
+description = "最大连通图中的高压节点与支路"
+icon = "network"
+unit = "kV"
+
+[[news]]
+date = "2026-08-03"
+title = "海陆空间范围已统一"
+content = "省级行政边界与海洋功能区进入同一 spatial 数据集。"
+tag = "SPATIAL"
+
+[[news]]
+date = "2026-08-02"
+title = "映射数据接口完成整理"
+content = "发电、储能、人口和电网对象均可通过稳定的数据集标识读取。"
+tag = "MAPPING"
+
+[[news]]
+date = "2026-08-01"
+title = "ERA5 资源数据完成标准化"
+content = "陆上风电、海上风电、光伏与径流式水电资源采用统一时空结构。"
+tag = "RESOURCE"

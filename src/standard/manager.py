@@ -6,9 +6,9 @@ from collections.abc import Iterable
 from pathlib import Path
 import tomllib
 
+import matplotlib.pyplot as plt
 import pandas as pd
 import xarray as xr
-from matplotlib.figure import Figure
 
 from ..raw import RawDataManager
 from .generation import _GenerationStandardizer
@@ -16,7 +16,7 @@ from .load import _LoadStandardizer
 from .network import _NetworkStandardizer
 from .parameter import _ParameterStandardizer
 from .population import _PopulationStandardizer
-from .plot import PLOTTERS
+from .plot import PLOTTERS, PlotResult
 from .resource import _ResourceStandardizer
 from .schema import (
     DATASET_IDS,
@@ -126,17 +126,37 @@ class StandardDataManager:
         elif dataset_id == "parameter":
             data = _read_dataframe(paths[0])
         else:
-            data = xr.open_dataset(paths[0])
+            data = xr.open_dataset(paths[0], chunks="auto")
+        if dataset_id == "population":
+            data["class"] = "cell_population"
+            data["geometry_method"] = "aggregated_source_cell"
+        elif dataset_id == "resource":
+            data = data.assign_coords(
+                geometry_method=(
+                    "uid", ["source_cell_centroid"] * data.sizes["uid"]
+                )
+            )
         _validate_dataset(data, dataset_id)
         return data
 
-    def plot(self, dataset_id: str, **kwargs: object) -> Figure:
+    def plot(self, dataset_id: str, **kwargs: object) -> PlotResult:
         """Return one representative figure without writing an output file."""
 
         data = self.load(dataset_id)
-        if dataset_id in {"network", "population", "resource"}:
+        if dataset_id in {
+            "network",
+            "generation",
+            "storage",
+            "load",
+            "population",
+            "resource",
+        }:
             kwargs.setdefault("spatial", self.load("spatial"))
-        return PLOTTERS[dataset_id](data, **kwargs)
+        with plt.ioff():
+            figure = PLOTTERS[dataset_id](data, **kwargs)
+        if isinstance(data, xr.Dataset):
+            data.close()
+        return figure
 
     def schema(
         self,
