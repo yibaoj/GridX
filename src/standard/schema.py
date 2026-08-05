@@ -64,6 +64,28 @@ REQUIRED_COLUMNS = {
         "geometry_method", "observed_at", "valid_from", "valid_to",
         "source_id", "source_uid", "mapping_rule_id",
     ),
+    "network.bus": (
+        "uid", "class", "subclass", "status", "voltage_kv", "current_type",
+        "geometry", "geometry_method", "observed_at", "valid_from", "valid_to",
+        "source_id", "source_uid",
+    ),
+    "network.branch": (
+        "uid", "class", "subclass", "status", "voltage_kv", "current_type",
+        "from_bus_uid", "to_bus_uid", "length_km", "geometry", "geometry_method", "observed_at",
+        "valid_from", "valid_to", "source_id", "source_uid",
+    ),
+    "network.transformer": (
+        "uid", "class", "subclass", "status", "from_bus_uid", "to_bus_uid",
+        "from_voltage_kv", "to_voltage_kv", "geometry", "geometry_method",
+        "observed_at", "valid_from", "valid_to", "source_id", "source_uid",
+    ),
+    "network.converter": (
+        "uid", "class", "subclass", "status", "from_bus_uid", "to_bus_uid",
+        "from_voltage_kv", "to_voltage_kv", "from_current_type", "to_current_type",
+        "geometry", "geometry_method", "observed_at", "valid_from", "valid_to",
+        "source_id", "source_uid",
+    ),
+    # Internal geographic connectivity used before electrical bus conversion.
     "network.nodes": (
         "uid", "class", "subclass", "status", "voltage_kv", "geometry",
         "geometry_method", "observed_at", "valid_from", "valid_to",
@@ -79,9 +101,10 @@ REQUIRED_COLUMNS = {
         "observed_at", "valid_from", "valid_to", "source_id", "source_uid",
     ),
     "parameter": (
-        "uid", "applies_to_dataset", "applies_to_uid", "class", "subclass",
-        "status", "observed_at", "valid_from", "valid_to", "source_id",
-        "source_uid",
+        "uid", "name", "group", "value", "unit",
+        "applies_to_dataset", "applies_to_uid", "class", "subclass", "status",
+        "observed_at", "valid_from", "valid_to", "source_id", "source_uid",
+        "source_version",
     ),
 }
 
@@ -130,10 +153,27 @@ FIELD_DESCRIPTIONS = {
     "fuel": "Normalized fuel label.",
     "chp": "Whether the generation asset provides combined heat and power.",
     "ccs": "Whether the generation asset uses carbon capture and storage.",
-    "voltage_kv": "One or more voltage levels in kV.",
-    "from_uid": "UID of the branch start node; direction is topological only.",
-    "to_uid": "UID of the branch end node; direction is topological only.",
+    "voltage_kv": "Voltage level in kV; electrical network components use one scalar level.",
+    "current_type": "Electrical current type: AC or DC.",
+    "from_bus_uid": "UID of the first connected electrical bus; direction is topological only.",
+    "to_bus_uid": "UID of the second connected electrical bus; direction is topological only.",
+    "from_voltage_kv": "Voltage level of the first connected bus in kV.",
+    "to_voltage_kv": "Voltage level of the second connected bus in kV.",
+    "from_current_type": "Current type of the first connected bus.",
+    "to_current_type": "Current type of the second connected bus.",
+    "from_uid": "UID of the internal geographic start node.",
+    "to_uid": "UID of the internal geographic end node.",
     "length_km": "Projected network-feature length in kilometres.",
+    "voltage_raw": "Unmodified voltage tag from the source network feature.",
+    "voltage_assignment_method": "Rule used to preserve or infer voltage levels.",
+    "voltage_inferred": "Whether any voltage level was inferred rather than directly sourced.",
+    "voltage_reference_uid": "Source network object used for voltage inference.",
+    "circuits_raw": "Unmodified circuits tag from the source network feature.",
+    "cables_raw": "Unmodified cables tag from the source network feature.",
+    "circuit_allocation_method": "Rule used to allocate source circuits by voltage.",
+    "cable_allocation_method": "Rule used to allocate source cables by voltage.",
+    "circuit_inferred": "Whether the per-voltage circuit count was inferred.",
+    "cable_inferred": "Whether the per-voltage cable count was inferred.",
     "geometry": "Canonical geometry in the dataset CRS.",
     "geometry_method": "Method used to obtain or infer the geometry.",
     "observed_at": "Time at which the source record was observed.",
@@ -144,6 +184,25 @@ FIELD_DESCRIPTIONS = {
     "mapping_rule_id": "Classification rule that produced class and subclass.",
     "applies_to_dataset": "Dataset to which the parameter applies.",
     "applies_to_uid": "Optional UID of the specific object to which it applies.",
+    "name": "Stable canonical parameter name used across data, case, and application layers.",
+    "group": "Parameter family: technical, economic, environmental, or others.",
+    "value": "Numeric parameter value in the stated unit.",
+    "source_name": "Unmodified parameter name used by the source.",
+    "selector_json": "Optional structured matching conditions beyond the common selector columns.",
+    "scenario": "Optional scenario to which the parameter applies.",
+    "priority": "Explicit resolver priority; smaller values are preferred.",
+    "is_derived": "Whether the value was calculated or inferred from another source value.",
+    "derivation": "Auditable explanation of how a derived value was calculated.",
+    "quality": "Source, derivation, or proxy quality label.",
+    "notes": "Qualification needed to interpret or apply the parameter.",
+    "reference_url": "Publication or repository URL supporting the parameter.",
+    "source_provider": "Institution or project that supplied the parameter.",
+    "scope": "Geographic, technological, or system scope of the parameter.",
+    "standard_type": "Named equipment standard type used by the source library.",
+    "pypsa_technology": "PyPSA technology-data technology label.",
+    "fuel_technology": "Fuel label used to associate fuel and emission parameters.",
+    "currency_year": "Price year used for monetary values.",
+    "source_version": "Version, release, or commit of the upstream parameter source.",
     "time": "Timestamp coordinate.",
     "location": "Human-readable location associated with uid.",
     "timezone": "Timezone used to interpret the time coordinate.",
@@ -161,12 +220,12 @@ FIELD_DESCRIPTIONS = {
     "cell_kind": "Geometry family used to construct the standard cells.",
     "source_cell_uid": "UID of the unclipped source cell.",
     "cell_distance_km": "Distance used when assigning an object to a cell.",
-    "node_uid": "UID of the selected electrical-network node.",
-    "node_mapping_method": "Geometry- or cell-based node mapping method.",
-    "node_distance_km": "Distance from the source object to the selected node.",
-    "node_same_admin": "Whether the source object and node share an admin UID.",
-    "node_spatial_uid": "Standard-cell UID assigned to the selected node.",
-    "node_admin_uid": "Administrative UID assigned to the selected node.",
+    "bus_uid": "UID of the selected electrical-network bus.",
+    "bus_mapping_method": "Geometry- or cell-based bus mapping method.",
+    "bus_distance_km": "Distance from the source object to the selected bus.",
+    "bus_same_admin": "Whether the source object and bus share an admin UID.",
+    "bus_spatial_uid": "Standard-cell UID assigned to the selected bus.",
+    "bus_admin_uid": "Administrative UID assigned to the selected bus.",
     "mapping_dataset_id": "Stable mapped-data identifier.",
     "in_largest_connected_graph": "Whether the object is in the retained network.",
 }
@@ -177,25 +236,34 @@ _STRING_FIELDS = {
     "uid", "class", "subclass", "level", "status", "fuel",
     "geometry_method", "observed_at", "valid_from", "valid_to", "source_id",
     "source_uid", "mapping_rule_id", "from_uid", "to_uid",
-    "applies_to_dataset", "applies_to_uid",
+    "from_bus_uid", "to_bus_uid",
+    "current_type", "from_current_type", "to_current_type",
+    "applies_to_dataset", "applies_to_uid", "name", "group", "unit",
+    "source_version",
 }
 _NUMERIC_FIELDS = {
     "capacity_mw", "power_capacity_mw", "energy_capacity_mwh", "duration_h",
-    "length_km", "population",
+    "length_km", "population", "value", "capacity_min_mw", "capacity_max_mw",
+    "priority", "from_voltage_kv", "to_voltage_kv",
 }
-_BOOLEAN_FIELDS = {"chp", "ccs"}
+_BOOLEAN_FIELDS = {
+    "chp", "ccs", "voltage_inferred", "circuit_inferred", "cable_inferred",
+    "is_derived", "inferred",
+}
 
 
 @dataclass(frozen=True)
 class NetworkData:
-    """Canonical OSM connectivity represented by node and branch tables."""
+    """Canonical electrical network represented by four component tables."""
 
-    nodes: gpd.GeoDataFrame
-    branches: gpd.GeoDataFrame
+    bus: gpd.GeoDataFrame
+    branch: gpd.GeoDataFrame
+    transformer: gpd.GeoDataFrame
+    converter: gpd.GeoDataFrame
 
     @property
     def schema(self) -> "_SchemaAccessor":
-        """Return the schema accessor for the node and branch tables."""
+        """Return the schema accessor for all electrical component tables."""
 
         return _SchemaAccessor(self)
 
@@ -205,8 +273,10 @@ def _dataset_schema(data: object) -> pd.DataFrame:
 
     if isinstance(data, NetworkData):
         rows = [
-            *_frame_schema_rows(data.nodes, "nodes", "network.nodes"),
-            *_frame_schema_rows(data.branches, "branches", "network.branches"),
+            *_frame_schema_rows(data.bus, "bus", "network.bus"),
+            *_frame_schema_rows(data.branch, "branch", "network.branch"),
+            *_frame_schema_rows(data.transformer, "transformer", "network.transformer"),
+            *_frame_schema_rows(data.converter, "converter", "network.converter"),
         ]
     elif isinstance(data, pd.DataFrame):
         rows = _frame_schema_rows(
@@ -516,7 +586,12 @@ def _finalize_frame(
     for column in string_columns:
         frame[column] = _string_series(frame[column], frame.index)
     if "voltage_kv" in frame:
-        frame["voltage_kv"] = _voltage_series(frame["voltage_kv"], frame.index)
+        if schema_id in {"network.bus", "network.branch"}:
+            frame["voltage_kv"] = pd.to_numeric(
+                frame["voltage_kv"], errors="coerce"
+            ).astype("Float64")
+        else:
+            frame["voltage_kv"] = _voltage_series(frame["voltage_kv"], frame.index)
     for column in _NUMERIC_FIELDS.intersection(frame.columns):
         frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("Float64")
     for column in _BOOLEAN_FIELDS.intersection(frame.columns):
@@ -569,7 +644,10 @@ def _validate_frame(frame: pd.DataFrame, schema_id: str) -> None:
     for column in _BOOLEAN_FIELDS.intersection(required):
         if not pd.api.types.is_bool_dtype(frame[column].dtype):
             raise TypeError(f"{schema_id}.{column} must be nullable boolean.")
-    if "voltage_kv" in required:
+    if "voltage_kv" in required and schema_id in {"network.bus", "network.branch"}:
+        if not pd.api.types.is_numeric_dtype(frame["voltage_kv"].dtype):
+            raise TypeError(f"{schema_id}.voltage_kv must be numeric.")
+    elif "voltage_kv" in required:
         dtype = frame["voltage_kv"].dtype
         if not (
             isinstance(dtype, pd.ArrowDtype)
@@ -620,8 +698,10 @@ def _validate_dataset(data: object, dataset_id: str) -> None:
     if dataset_id == "network":
         if not isinstance(data, NetworkData):
             raise TypeError("network must be represented by NetworkData.")
-        _validate_frame(data.nodes, "network.nodes")
-        _validate_frame(data.branches, "network.branches")
+        _validate_frame(data.bus, "network.bus")
+        _validate_frame(data.branch, "network.branch")
+        _validate_frame(data.transformer, "network.transformer")
+        _validate_frame(data.converter, "network.converter")
     elif dataset_id in XARRAY_SCHEMAS:
         if not isinstance(data, xr.Dataset):
             raise TypeError(f"{dataset_id} must be an xarray.Dataset.")

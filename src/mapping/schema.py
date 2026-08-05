@@ -22,12 +22,12 @@ _DESCRIPTIONS = {
     "source_cell_uid": "UID of the unclipped source cell.",
     "mapping_dataset_id": "Stable mapped-data identifier.",
     "cell_distance_km": "Distance used when assigning an object to a cell.",
-    "node_uid": "UID of the selected electrical-network node.",
-    "node_mapping_method": "Geometry- or cell-based node mapping method.",
-    "node_distance_km": "Distance from the source object to the selected node.",
-    "node_same_admin": "Whether the source object and node share an admin UID.",
-    "node_spatial_uid": "Standard-cell UID assigned to the selected node.",
-    "node_admin_uid": "Administrative UID assigned to the selected node.",
+    "bus_uid": "UID of the selected electrical-network bus.",
+    "bus_mapping_method": "Geometry- or cell-based bus mapping method.",
+    "bus_distance_km": "Distance from the source object to the selected bus.",
+    "bus_same_admin": "Whether the source object and bus share an admin UID.",
+    "bus_spatial_uid": "Standard-cell UID assigned to the selected bus.",
+    "bus_admin_uid": "Administrative UID assigned to the selected bus.",
     "branch_uid": "UID of the mapped network branch.",
     "overlap_length_km": "Branch length contained in the standard cell.",
     "branch_length_share": "Share of total branch length contained in the cell.",
@@ -45,29 +45,31 @@ _REQUIRED = {
         "centre_geometry", "area_km2", "population",
     },
     ("load", "data"): {
-        "spatial_uid", "spatial_level", "node_uid", "node_mapping_method", "node_distance_km",
-        "node_same_admin", "node_spatial_uid", "node_admin_uid",
+        "spatial_uid", "spatial_level", "bus_uid", "bus_mapping_method", "bus_distance_km",
+        "bus_same_admin", "bus_spatial_uid", "bus_admin_uid",
     },
     ("resource", "data"): {"spatial_uid", "spatial_level"},
     ("generation", "data"): {
-        "spatial_uid", "spatial_level", "admin_uid", "cell_distance_km", "node_uid",
-        "node_mapping_method", "node_distance_km", "node_same_admin",
-        "node_spatial_uid", "node_admin_uid",
+        "spatial_uid", "spatial_level", "admin_uid", "cell_distance_km", "bus_uid",
+        "bus_mapping_method", "bus_distance_km", "bus_same_admin",
+        "bus_spatial_uid", "bus_admin_uid",
     },
     ("storage", "data"): {
-        "spatial_uid", "spatial_level", "admin_uid", "cell_distance_km", "node_uid",
-        "node_mapping_method", "node_distance_km", "node_same_admin",
-        "node_spatial_uid", "node_admin_uid",
+        "spatial_uid", "spatial_level", "admin_uid", "cell_distance_km", "bus_uid",
+        "bus_mapping_method", "bus_distance_km", "bus_same_admin",
+        "bus_spatial_uid", "bus_admin_uid",
     },
     ("network", "branch_mapping"): {
         "branch_uid", "spatial_uid", "spatial_level", "admin_uid", "overlap_length_km",
         "branch_length_share", "mapping_status",
     },
-    ("network", "nodes"): {
+    ("network", "bus"): {
         "spatial_uid", "spatial_level", "admin_uid", "cell_distance_km",
         "in_largest_connected_graph",
     },
-    ("network", "branches"): {"in_largest_connected_graph"},
+    ("network", "branch"): {"in_largest_connected_graph"},
+    ("network", "transformer"): {"in_largest_connected_graph"},
+    ("network", "converter"): {"in_largest_connected_graph"},
 }
 
 
@@ -102,7 +104,9 @@ def mapping_schema(
 
     if isinstance(data, MappedNetwork):
         table = pd.concat([
-            _component_schema(NetworkData(data.nodes, data.branches), "network"),
+            _component_schema(NetworkData(
+                data.bus, data.branch, data.transformer, data.converter
+            ), "network"),
             _component_schema(data.branch_mapping, "branch_mapping"),
         ], ignore_index=True)
         table.insert(0, "mapping_id", mapping_id or "network")

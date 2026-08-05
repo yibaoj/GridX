@@ -28,16 +28,26 @@ def build_spatial_cells(
     ]
     if not level_priority or len(level_priority) != len(set(level_priority)):
         raise ValueError("cell.level_priority must contain unique spatial levels.")
+    levels = [str(level) for level in options.get("levels", level_priority) if level]
+    if not levels or len(levels) != len(set(levels)):
+        raise ValueError("cell.levels must contain unique spatial levels.")
+    missing_priorities = set(levels).difference(level_priority)
+    if missing_priorities:
+        raise ValueError(
+            "cell.level_priority does not order selected levels: "
+            f"{sorted(missing_priorities)}"
+        )
+    active_priority = [level for level in level_priority if level in levels]
     spatial_units = spatial.loc[
-        spatial["level"].isin(level_priority), ["uid", "level", "geometry"]
+        spatial["level"].isin(levels), ["uid", "level", "geometry"]
     ].copy()
     if spatial_units.empty:
         available = sorted(spatial["level"].dropna().unique())
         raise ValueError(
-            f"spatial has none of levels={level_priority!r}; available levels are "
+            f"spatial has none of levels={levels!r}; available levels are "
             f"{available}."
         )
-    missing = set(level_priority).difference(spatial_units["level"].unique())
+    missing = set(levels).difference(spatial_units["level"].unique())
     if missing:
         raise ValueError(f"Configured spatial levels are unavailable: {sorted(missing)}")
     spatial_units = spatial_units.rename(columns={
@@ -45,22 +55,32 @@ def build_spatial_cells(
         "level": "spatial_level",
     }).to_crs(metric_crs)
     spatial_units["geometry"] = spatial_units.geometry.map(polygonal_geometry)
-    spatial_units = _apply_level_priority(spatial_units, level_priority)
-    source_cells = _source_cells(
-        spatial_units, options, project_root, metric_crs
+    spatial_units = _resolve_same_level_overlaps(
+        spatial_units,
+        tolerance_km2=float(
+            options.get("same_level_overlap_tolerance_km2", 0.0)
+        ),
     )
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message="invalid value encountered in intersection",
-            category=RuntimeWarning,
+    spatial_units = _apply_level_priority(spatial_units, active_priority)
+    if str(options["kind"]) == "spatial":
+        cells = spatial_units.copy()
+        cells["source_cell_uid"] = "spatial:" + cells["admin_uid"].astype(str)
+    else:
+        source_cells = _source_cells(
+            spatial_units, options, project_root, metric_crs
         )
-        cells = gpd.overlay(
-            source_cells,
-            spatial_units,
-            how="intersection",
-            keep_geom_type=True,
-        ).explode(index_parts=False, ignore_index=True)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="invalid value encountered in intersection",
+                category=RuntimeWarning,
+            )
+            cells = gpd.overlay(
+                source_cells,
+                spatial_units,
+                how="intersection",
+                keep_geom_type=True,
+            ).explode(index_parts=False, ignore_index=True)
     cells = cells.loc[~cells.geometry.is_empty].copy()
     cells = cells.dissolve(
         by=["admin_uid", "spatial_level", "source_cell_uid"],
@@ -71,11 +91,17 @@ def build_spatial_cells(
         cells,
         minimum_area_km2=float(options["minimum_area_km2"]),
     )
+    cells["geometry"] = cells.geometry.map(polygonal_geometry)
+    cells["area_km2"] = cells.geometry.area / 1e6
     cells["centre_geometry"] = cells.geometry.centroid
-    cells["spatial_uid"] = [
-        f"cell:{row.admin_uid}:{row.source_cell_uid}"
-        for row in cells.itertuples()
-    ]
+    cells["spatial_uid"] = (
+        "cell:" + cells["admin_uid"].astype(str)
+        if str(options["kind"]) == "spatial"
+        else [
+            f"cell:{row.admin_uid}:{row.source_cell_uid}"
+            for row in cells.itertuples()
+        ]
+    )
     cells["cell_kind"] = str(options["kind"])
     columns = [
         "spatial_uid", "admin_uid", "geometry", "centre_geometry",
@@ -88,6 +114,7 @@ def build_spatial_cells(
     result = cells.loc[:, columns].drop(columns="centre_geometry").to_crs(
         spatial.crs
     )
+    result["geometry"] = result.geometry.map(polygonal_geometry)
     result["centre_geometry"] = centres.reset_index(drop=True)
     result = result.loc[:, columns]
     result.attrs.update({
@@ -96,6 +123,56 @@ def build_spatial_cells(
     if result["spatial_uid"].duplicated().any():
         raise ValueError("Generated spatial_uid values are not unique.")
     return result
+
+
+def _resolve_same_level_overlaps(
+    spatial_units: gpd.GeoDataFrame,
+    *,
+    tolerance_km2: float,
+) -> gpd.GeoDataFrame:
+    """Remove tiny same-level overlaps and reject substantive ambiguity."""
+
+    if tolerance_km2 < 0:
+        raise ValueError("cell.same_level_overlap_tolerance_km2 cannot be negative.")
+    resolved = []
+    for level, group in spatial_units.groupby("spatial_level", sort=True):
+        occupied = None
+        for _, row in group.sort_values("admin_uid").iterrows():
+            geometry = row.geometry
+            if occupied is not None:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="invalid value encountered in intersection",
+                        category=RuntimeWarning,
+                    )
+                    overlap_area = geometry.intersection(occupied).area / 1e6
+                if overlap_area > tolerance_km2:
+                    raise ValueError(
+                        f"Spatial level {level!r} has an overlap of "
+                        f"{overlap_area:.6g} km2 at {row['admin_uid']!r}, above "
+                        f"the configured tolerance {tolerance_km2:g} km2."
+                    )
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="invalid value encountered in difference",
+                        category=RuntimeWarning,
+                    )
+                    geometry = polygonal_geometry(geometry.difference(occupied))
+            if geometry.is_empty:
+                continue
+            record = row.copy()
+            record.geometry = geometry
+            resolved.append(record)
+            occupied = polygonal_geometry(
+                geometry if occupied is None else occupied.union(geometry)
+            )
+    return gpd.GeoDataFrame(
+        resolved,
+        geometry="geometry",
+        crs=spatial_units.crs,
+    )
 
 
 def _apply_level_priority(
@@ -184,7 +261,7 @@ def _source_cells(
             raise TypeError("Custom cells must contain only polygon geometries.")
         frame["source_cell_uid"] = [f"polygon:{index}" for index in frame.index]
         return frame[["source_cell_uid", "geometry"]]
-    raise ValueError("cell.kind must be 'square' or 'polygon'.")
+    raise ValueError("cell.kind must be 'square', 'polygon', or 'spatial'.")
 
 
 def _merge_small_cells(

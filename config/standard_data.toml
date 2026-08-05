@@ -4,22 +4,30 @@ canonical_crs = "EPSG:4326"
 
 [datasets.spatial]
 processor = "spatial"
-source_ids = ["province_boundaries", "offshore_wind_potential_eap"]
+source_ids = ["province_boundaries", "china_eez_marine_regions"]
 output = "spatial.parquet"
 
 [datasets.network]
 processor = "network"
 source_ids = ["osm_china_pbf"]
-outputs = { nodes = "network_nodes.parquet", branches = "network_branches.parquet" }
+output = "network"
 
 [datasets.network.options]
 feature_layer = "power_features"
 preparation_script = "prepare_osm_power_network.sh"
 feature_output_prefix = "data/osm/china-power-network"
 reference_cache = "outputs/standard/cache/osm_power_ways.osm.pbf"
-require_line_voltage = true
+require_line_voltage = false
+anomalous_frequencies_hz = [60.0]
+# Classifies an already identified OSM station as transmission/distribution;
+# it never promotes a line terminal to station.
+transmission_voltage_threshold_kv = 220.0
 station_tolerance_m = 500.0
 line_endpoint_tolerance_m = 1.0
+fallback_voltage_kv = 220.0
+default_circuits = 1.0
+ac_cables_per_circuit = 3.0
+dc_cables_per_circuit = 2.0
 metric_crs = "+proj=aea +lat_1=25 +lat_2=47 +lat_0=0 +lon_0=105 +datum=WGS84 +units=m +no_defs"
 include_statuses = []
 
@@ -52,12 +60,40 @@ class_mapping_file = "config/class_mapping.csv"
 
 [datasets.parameter]
 processor = "parameter"
-source_ids = ["pypsa_technology_costs"]
-output = "parameter.parquet"
+source_ids = [
+  "pypsa_technology_costs",
+  "technical_economic_assumptions",
+  "operational_assumptions",
+  "pandapower_standard_types",
+  "china_fuel_prices_2025",
+  "opal_rt_line_assumptions",
+]
+outputs = { data = "parameter.parquet", report = "parameter_validation_report.json" }
 
 [datasets.parameter.options]
-assumptions_file = "config/technical_economic_assumptions.csv"
+technology_data_source_id = "pypsa_technology_costs"
+technical_assumptions_source_id = "technical_economic_assumptions"
+supplemental_source_ids = [
+  "operational_assumptions",
+  "pandapower_standard_types",
+  "china_fuel_prices_2025",
+]
+line_assumptions_source_id = "opal_rt_line_assumptions"
 pypsa_year = 2025
+default_priority = 100
+conflict_tolerance = 1e-6
+name_aliases = {}
+quality_order = [
+  "official_observation",
+  "source",
+  "standard_type_proxy",
+  "derived",
+  "generic",
+  "interpolated",
+  "proxy",
+  "low",
+  "model_default",
+]
 
 [datasets.load]
 processor = "load"

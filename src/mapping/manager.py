@@ -7,20 +7,21 @@ import tomllib
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import xarray as xr
 
 from ..standard import NetworkData, StandardDataManager
-from ..standard.plot import PlotResult
+from ..standard.plot import PlotResult, filter_spatial_levels
 from .cell import build_spatial_cells
 from .model import MAPPING_IDS, MappedNetwork, MappingData
 from .network import (
-    attach_node_coordinates,
-    attach_node_mapping,
+    attach_bus_coordinates,
+    attach_bus_mapping,
     largest_connected_network,
     map_branches_to_cells,
     map_objects_to_cells,
-    map_to_nodes,
+    map_to_buses,
 )
 from .plot import PLOTTERS
 from .space import aggregate_extensive, map_timeseries_to_cells
@@ -29,18 +30,16 @@ from .schema import annotate_schema, mapping_schema
 
 
 class SpatiotemporalMappingManager:
-    """Build explicit spatial-cell and electrical-node mappings."""
+    """Build explicit spatial-cell and electrical-bus mappings."""
 
     _OUTPUTS_BY_MAPPING = {
         "spatial": ("spatial",),
         "population": ("population",),
-        "load": ("load", "load_node"),
+        "load": ("load",),
         "resource": ("resource",),
-        "network": (
-            "network_nodes", "network_branches", "network_branch_cells"
-        ),
-        "generation": ("generation", "generation_node"),
-        "storage": ("storage", "storage_node"),
+        "network": ("network",),
+        "generation": ("generation",),
+        "storage": ("storage",),
     }
 
     def __init__(
@@ -83,7 +82,7 @@ class SpatiotemporalMappingManager:
         return largest_connected_network(self.standard_data.load("network"))
 
     def build(self) -> MappingData:
-        """Build all configured cell, time, network, and node mappings."""
+        """Build all configured cell, time, network, and bus mappings."""
 
         cells = self.build_cells()
         nominal_cell_area = (
@@ -153,9 +152,7 @@ class SpatiotemporalMappingManager:
             auxiliary_value=auxiliary_value,
             conservation_tolerance=float(load_options["conservation_tolerance"]),
         )
-        self._write_xarray("load", load, "demand_mw")
         load_source.close()
-        load = self._read_xarray("load", "load")
 
         resource_source = self.standard_data.load("resource")
         resource = map_timeseries_to_cells(
@@ -183,17 +180,20 @@ class SpatiotemporalMappingManager:
         connected_network = self.build_network()
         network = NetworkData(
             map_objects_to_cells(
-                connected_network.nodes,
+                connected_network.bus,
                 cells,
                 metric_crs=self.options["metric_crs"],
             ),
-            connected_network.branches,
+            connected_network.branch,
+            connected_network.transformer,
+            connected_network.converter,
         )
-        network.branches.attrs["mapping_dataset_id"] = "network"
-        annotate_schema(network.nodes, "network", "nodes")
-        annotate_schema(network.branches, "network", "branches")
-        self._write_geodataframe("network_nodes", network.nodes)
-        self._write_geodataframe("network_branches", network.branches)
+        for component in ("branch", "transformer", "converter"):
+            getattr(network, component).attrs["mapping_dataset_id"] = "network"
+        annotate_schema(network.bus, "network", "bus")
+        annotate_schema(network.branch, "network", "branch")
+        annotate_schema(network.transformer, "network", "transformer")
+        annotate_schema(network.converter, "network", "converter")
         generation = map_objects_to_cells(
             self.standard_data.load("generation"),
             cells,
@@ -204,33 +204,32 @@ class SpatiotemporalMappingManager:
             cells,
             metric_crs=self.options["metric_crs"],
         )
-        self._write_geodataframe("generation", generation)
-        self._write_geodataframe("storage", storage)
         branch_cells = map_branches_to_cells(
-            network.branches,
+            network.branch,
             cells,
             metric_crs=self.options["metric_crs"],
         )
-        self._write_dataframe("network_branch_cells", branch_cells)
+        branch_cells.attrs["mapping_dataset_id"] = "network"
 
-        asset_options = self.config["asset_node_mapping"]
-        node_classes = list(self.config["network"].get("node_classes", []))
+        asset_options = self.config["asset_bus_mapping"]
+        bus_subclasses = list(self.config["network"].get("bus_subclasses", []))
         common = {
-            "nodes": network.nodes,
+            "buses": network.bus,
             "cells": cells,
             "source_uid_column": "uid",
             "prefer_same_admin": bool(asset_options["prefer_same_admin"]),
             "metric_crs": self.options["metric_crs"],
             "random_seed": int(self.options["random_seed"]),
-            "node_classes": node_classes,
+            "bus_subclasses": bus_subclasses,
+            "voltage_preference": str(asset_options["voltage_preference"]),
         }
-        generation_node = map_to_nodes(
+        generation_bus = map_to_buses(
             generation,
             output_uid_column="generation_uid",
             method=str(asset_options["generation_method"]),
             **common,
         )
-        storage_node = map_to_nodes(
+        storage_bus = map_to_buses(
             storage,
             output_uid_column="storage_uid",
             method=str(asset_options["storage_method"]),
@@ -239,55 +238,62 @@ class SpatiotemporalMappingManager:
         load_cells = cells.copy()
         load_cells["geometry"] = load_cells["centre_geometry"]
         load_cells = load_cells.set_geometry("geometry")
-        load_node_options = self.config["load_node_mapping"]
-        load_node = map_to_nodes(
+        load_bus_options = self.config["load_bus_mapping"]
+        load_bus = map_to_buses(
             load_cells,
-            network.nodes,
+            network.bus,
             cells,
             source_uid_column="spatial_uid",
             output_uid_column="load_spatial_uid",
-            method=str(load_node_options["method"]),
-            prefer_same_admin=bool(load_node_options["prefer_same_admin"]),
+            method=str(load_bus_options["method"]),
+            prefer_same_admin=bool(load_bus_options["prefer_same_admin"]),
             metric_crs=self.options["metric_crs"],
             random_seed=int(self.options["random_seed"]),
-            node_classes=node_classes,
+            bus_subclasses=bus_subclasses,
+            voltage_preference=str(load_bus_options["voltage_preference"]),
         )
-        self._write_dataframe("generation_node", generation_node)
-        self._write_dataframe("storage_node", storage_node)
-        self._write_dataframe("load_node", load_node)
+        load = annotate_schema(
+            attach_bus_coordinates(
+                load,
+                load_bus,
+                source_uid_column="load_spatial_uid",
+            ),
+            "load",
+        )
+        generation = annotate_schema(
+            attach_bus_mapping(
+                generation,
+                generation_bus,
+                source_uid_column="generation_uid",
+            ),
+            "generation",
+        )
+        storage = annotate_schema(
+            attach_bus_mapping(
+                storage,
+                storage_bus,
+                source_uid_column="storage_uid",
+            ),
+            "storage",
+        )
+        self._write_xarray("load", load, "demand_mw")
+        self._write_geodataframe("generation", generation)
+        self._write_geodataframe("storage", storage)
+        self._write_network(network, branch_cells)
         return MappingData(
             spatial=cells,
             population=population,
-            load=annotate_schema(
-                attach_node_coordinates(
-                    load,
-                    load_node,
-                    source_uid_column="load_spatial_uid",
-                ),
-                "load",
-            ),
+            load=load,
             resource=annotate_schema(resource, "resource"),
             network=MappedNetwork(
-                network.nodes,
-                network.branches,
+                network.bus,
+                network.branch,
+                network.transformer,
+                network.converter,
                 branch_cells,
             ),
-            generation=annotate_schema(
-                attach_node_mapping(
-                    generation,
-                    generation_node,
-                    source_uid_column="generation_uid",
-                ),
-                "generation",
-            ),
-            storage=annotate_schema(
-                attach_node_mapping(
-                    storage,
-                    storage_node,
-                    source_uid_column="storage_uid",
-                ),
-                "storage",
-            ),
+            generation=generation,
+            storage=storage,
         )
 
     def load(self, mapping_id: str | None = None) -> object:
@@ -304,46 +310,32 @@ class SpatiotemporalMappingManager:
                 f"Unknown mapping_id {mapping_id!r}; expected one of {mapping_ids}."
             )
         required = self._OUTPUTS_BY_MAPPING[mapping_id]
-        missing = [name for name in required if not self.outputs[name].exists()]
+        missing = [
+            name for name in required
+            if not all(path.exists() for path in self._output_paths(name))
+        ]
         if missing:
             raise FileNotFoundError(f"Mapping outputs are unavailable: {missing}")
         if mapping_id == "network":
-            return MappedNetwork(
-                self._read_geodataframe("network_nodes", "network", "nodes"),
-                self._read_geodataframe(
-                    "network_branches", "network", "branches"
-                ),
-                pd.read_parquet(self.outputs["network_branch_cells"]),
-            )
+            return self._read_network()
         if mapping_id in {"spatial", "population"}:
             return self._read_geodataframe(mapping_id, mapping_id)
         if mapping_id == "resource":
             return self._read_xarray("resource", "resource")
         if mapping_id == "load":
-            data = self._read_xarray("load", "load")
-            return annotate_schema(
-                attach_node_coordinates(
-                    data,
-                    pd.read_parquet(self.outputs["load_node"]),
-                    source_uid_column="load_spatial_uid",
-                ),
-                "load",
-            )
-        return annotate_schema(
-            attach_node_mapping(
-                self._read_geodataframe(mapping_id, mapping_id),
-                pd.read_parquet(self.outputs[f"{mapping_id}_node"]),
-                source_uid_column=f"{mapping_id}_uid",
-            ),
-            mapping_id,
-        )
+            return self._read_xarray("load", "load")
+        return self._read_geodataframe(mapping_id, mapping_id)
 
     def check(self) -> pd.Series:
         """Report whether each configured mapping output exists."""
 
         return pd.Series(
             {
-                mapping_id: all(self.outputs[name].exists() for name in names)
+                mapping_id: all(
+                    path.exists()
+                    for name in names
+                    for path in self._output_paths(name)
+                )
                 for mapping_id, names in self._OUTPUTS_BY_MAPPING.items()
             },
             name="output_available",
@@ -353,10 +345,19 @@ class SpatiotemporalMappingManager:
         """Return one mapped-data figure without writing an output file."""
 
         data = self.load(mapping_id)
-        kwargs.setdefault("spatial", self.standard_data.load("spatial"))
+        spatial_levels = kwargs.pop("spatial_levels", None)
+        spatial = kwargs.pop("spatial", self.standard_data.load("spatial"))
+        spatial = filter_spatial_levels(spatial, spatial_levels)
+        selected_levels = set(spatial["level"].astype(str))
+        if spatial_levels is not None:
+            data = _filter_plot_levels(data, selected_levels)
+        kwargs["spatial"] = spatial
         kwargs.setdefault("map_crs", self.options["metric_crs"])
         if mapping_id in {"network", "generation", "storage"}:
-            kwargs.setdefault("cells", self.load("spatial"))
+            cells = kwargs.pop("cells", self.load("spatial"))
+            kwargs["cells"] = cells.loc[
+                cells["spatial_level"].astype(str).isin(selected_levels)
+            ].copy()
         with plt.ioff():
             figure = PLOTTERS[mapping_id](data, **kwargs)
         if isinstance(data, xr.Dataset):
@@ -412,14 +413,58 @@ class SpatiotemporalMappingManager:
         self.outputs[name].parent.mkdir(parents=True, exist_ok=True)
         data.to_parquet(self.outputs[name], index=False)
 
+    def _write_network(
+        self,
+        network: NetworkData,
+        branch_mapping: pd.DataFrame,
+    ) -> None:
+        directory = self.outputs["network"]
+        directory.mkdir(parents=True, exist_ok=True)
+        for component in ("bus", "branch", "transformer", "converter"):
+            getattr(network, component).to_parquet(
+                directory / f"{component}.parquet", index=False
+            )
+        branch_mapping.to_parquet(directory / "branch_mapping.parquet", index=False)
+
+    def _read_network(self) -> MappedNetwork:
+        directory = self.outputs["network"]
+        branch_mapping = pd.read_parquet(directory / "branch_mapping.parquet")
+        branch_mapping.attrs["mapping_dataset_id"] = "network"
+        annotate_schema(branch_mapping, "network", "branch_mapping")
+        return MappedNetwork(
+            self._read_geodataframe_path(
+                directory / "bus.parquet", "network", "bus"
+            ),
+            self._read_geodataframe_path(
+                directory / "branch.parquet", "network", "branch"
+            ),
+            self._read_geodataframe_path(
+                directory / "transformer.parquet", "network", "transformer"
+            ),
+            self._read_geodataframe_path(
+                directory / "converter.parquet", "network", "converter"
+            ),
+            branch_mapping,
+        )
+
     def _read_geodataframe(
         self,
         name: str,
         mapping_id: str,
         component: str = "data",
     ) -> gpd.GeoDataFrame:
+        return self._read_geodataframe_path(
+            self.outputs[name], mapping_id, component
+        )
+
+    @staticmethod
+    def _read_geodataframe_path(
+        path: Path,
+        mapping_id: str,
+        component: str = "data",
+    ) -> gpd.GeoDataFrame:
         data = gpd.read_parquet(
-            self.outputs[name],
+            path,
             to_pandas_kwargs={"types_mapper": pd.ArrowDtype},
         )
         data.attrs.update({
@@ -429,9 +474,17 @@ class SpatiotemporalMappingManager:
         annotate_schema(data, mapping_id, component)
         return data
 
-    def _write_dataframe(self, name: str, data: pd.DataFrame) -> None:
-        self.outputs[name].parent.mkdir(parents=True, exist_ok=True)
-        data.to_parquet(self.outputs[name], index=False)
+    def _output_paths(self, name: str) -> tuple[Path, ...]:
+        if name != "network":
+            return (self.outputs[name],)
+        directory = self.outputs["network"]
+        return tuple(
+            directory / filename
+            for filename in (
+                "bus.parquet", "branch.parquet", "transformer.parquet",
+                "converter.parquet", "branch_mapping.parquet"
+            )
+        )
 
     def _write_xarray(self, name: str, data: xr.Dataset, variable: str) -> None:
         path = self.outputs[name]
@@ -455,3 +508,37 @@ class SpatiotemporalMappingManager:
         data.attrs["mapping_dataset_id"] = mapping_id
         annotate_schema(data, mapping_id)
         return data
+
+
+def _filter_plot_levels(data: object, levels: set[str]) -> object:
+    """Filter a mapped object for display without changing stored outputs."""
+
+    if isinstance(data, gpd.GeoDataFrame):
+        if "spatial_level" not in data:
+            return data
+        return data.loc[data["spatial_level"].astype(str).isin(levels)].copy()
+    if isinstance(data, xr.Dataset):
+        if "spatial_level" not in data.coords:
+            return data
+        mask = np.isin(data["spatial_level"].values.astype(str), list(levels))
+        return data.isel(uid=np.flatnonzero(mask))
+    if isinstance(data, MappedNetwork):
+        bus = data.bus.loc[
+            data.bus["spatial_level"].astype(str).isin(levels)
+        ].copy()
+        branch_mapping = data.branch_mapping.loc[
+            data.branch_mapping["spatial_level"].astype(str).isin(levels)
+        ].copy()
+        branch_uids = set(branch_mapping["branch_uid"].astype(str))
+        branch = data.branch.loc[
+            data.branch["uid"].astype(str).isin(branch_uids)
+        ].copy()
+        bus_uids = set(bus["uid"].astype(str))
+        equipment = []
+        for frame in (data.transformer, data.converter):
+            equipment.append(frame.loc[
+                frame["from_bus_uid"].astype(str).isin(bus_uids)
+                & frame["to_bus_uid"].astype(str).isin(bus_uids)
+            ].copy())
+        return MappedNetwork(bus, branch, *equipment, branch_mapping)
+    return data

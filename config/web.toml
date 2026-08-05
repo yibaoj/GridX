@@ -50,7 +50,7 @@ unit = "MW"
 [[layers]]
 id = "network"
 label = "输电网络"
-description = "最大连通图中的高压节点与支路"
+description = "最大连通图中的高压母线与支路"
 icon = "network"
 unit = "kV"
 

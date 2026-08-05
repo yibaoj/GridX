@@ -5,8 +5,11 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 import tomllib
+import warnings
 
+import geopandas as gpd
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import xarray as xr
 
@@ -14,9 +17,14 @@ from ..raw import RawDataManager
 from .generation import _GenerationStandardizer
 from .load import _LoadStandardizer
 from .network import _NetworkStandardizer
-from .parameter import _ParameterStandardizer
+from .parameter import (
+    DEFAULT_QUALITY_ORDER,
+    _ParameterStandardizer,
+    as_parameter_data,
+)
 from .population import _PopulationStandardizer
-from .plot import PLOTTERS, PlotResult
+from .plot import PLOTTERS, PlotResult, filter_spatial_levels
+from .geometry import polygonal_geometry
 from .resource import _ResourceStandardizer
 from .schema import (
     DATASET_IDS,
@@ -120,11 +128,23 @@ class StandardDataManager:
             data = NetworkData(
                 _read_geodataframe(paths[0]),
                 _read_geodataframe(paths[1]),
+                _read_geodataframe(paths[2]),
+                _read_geodataframe(paths[3]),
             )
         elif dataset_id in {"spatial", "generation", "storage", "population"}:
             data = _read_geodataframe(paths[0])
         elif dataset_id == "parameter":
-            data = _read_dataframe(paths[0])
+            data = as_parameter_data(_read_dataframe(paths[0]))
+            options = self.datasets["parameter"].get("options", {})
+            data.attrs["quality_order"] = tuple(
+                options.get("quality_order", DEFAULT_QUALITY_ORDER)
+            )
+            data.attrs["name_aliases"] = dict(
+                options.get("name_aliases", {})
+            )
+            data.attrs["conflict_tolerance"] = float(
+                options.get("conflict_tolerance", 1e-6)
+            )
         else:
             data = xr.open_dataset(paths[0], chunks="auto")
         if dataset_id == "population":
@@ -143,6 +163,9 @@ class StandardDataManager:
         """Return one representative figure without writing an output file."""
 
         data = self.load(dataset_id)
+        spatial_levels = kwargs.pop("spatial_levels", None)
+        if dataset_id == "spatial":
+            data = filter_spatial_levels(data, spatial_levels)
         if dataset_id in {
             "network",
             "generation",
@@ -151,7 +174,14 @@ class StandardDataManager:
             "population",
             "resource",
         }:
-            kwargs.setdefault("spatial", self.load("spatial"))
+            spatial = kwargs.pop("spatial", self.load("spatial"))
+            spatial = filter_spatial_levels(
+                spatial,
+                spatial_levels,
+            )
+            if spatial_levels is not None:
+                data = _filter_plot_extent(data, spatial)
+            kwargs["spatial"] = spatial
         with plt.ioff():
             figure = PLOTTERS[dataset_id](data, **kwargs)
         if isinstance(data, xr.Dataset):
@@ -207,9 +237,56 @@ class StandardDataManager:
 
     def _output_paths(self, dataset_id: str) -> list[Path]:
         config = self.datasets[dataset_id]
+        if dataset_id == "network":
+            directory = self.output_root / config["output"]
+            return [
+                directory / f"{component}.parquet"
+                for component in ("bus", "branch", "transformer", "converter")
+            ]
         filenames = (
             list(config["outputs"].values())
             if "outputs" in config
             else [config["output"]]
         )
         return [self.output_root / filename for filename in filenames]
+
+
+def _filter_plot_extent(data: object, spatial: gpd.GeoDataFrame) -> object:
+    """Limit a standard dataset to selected spatial units for plotting."""
+
+    if isinstance(data, gpd.GeoDataFrame):
+        region = _spatial_union(spatial, data.crs)
+        return data.loc[data.geometry.intersects(region)].copy()
+    if isinstance(data, xr.Dataset):
+        geometry = gpd.GeoSeries.from_wkt(
+            data["geometry"].values,
+            crs=str(data.attrs["crs"]),
+        )
+        region = _spatial_union(spatial, geometry.crs)
+        return data.isel(uid=np.flatnonzero(geometry.intersects(region)))
+    if isinstance(data, NetworkData):
+        bus_region = _spatial_union(spatial, data.bus.crs)
+        branch_region = _spatial_union(spatial, data.branch.crs)
+        return NetworkData(
+            data.bus.loc[data.bus.geometry.intersects(bus_region)].copy(),
+            data.branch.loc[
+                data.branch.geometry.intersects(branch_region)
+            ].copy(),
+            data.transformer.loc[
+                data.transformer.geometry.intersects(bus_region)
+            ].copy(),
+            data.converter.loc[
+                data.converter.geometry.intersects(bus_region)
+            ].copy(),
+        )
+    return data
+
+
+def _spatial_union(spatial: gpd.GeoDataFrame, crs: object) -> object:
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="invalid value encountered in unary_union",
+            category=RuntimeWarning,
+        )
+        return polygonal_geometry(spatial.to_crs(crs).geometry.union_all())

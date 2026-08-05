@@ -6,46 +6,53 @@ time_step = "1h"
 random_seed = 42
 
 [cell]
-kind = "square"
+kind = "spatial"
+# Used by every cell kind. With kind="spatial", each selected standard
+# spatial boundary becomes one cell after overlap resolution.
+levels = ["province", "marine_zone"]
 size_km = 50.0
 polygon_file = ""
 level_priority = ["province", "marine_zone"]
+same_level_overlap_tolerance_km2 = 1.0
 minimum_area_km2 = 5.0
 
 [spatial_mapping.load]
+# Load is extensive. "linear" uses area weights; "auxiliary" always
+# normalizes the configured auxiliary values over every covered target cell.
 method = "auxiliary"
 auxiliary_dataset = "population"
 auxiliary_value = "population"
+# Optional quality gate: require the raw auxiliary support to be finer than
+# the standard cells before aggregation. It does not determine scale direction.
 auxiliary_must_be_finer = true
 conservation_tolerance = 0.005
 
 [spatial_mapping.resource]
+# Resource availability is intensive; "linear" applies overlap-area averaging
+# in either scale direction. Width and height describe point-based source cells.
 method = "linear"
 source_cell_width_degrees = 0.25
 source_cell_height_degrees = 0.25
 
 [network]
-node_classes = ["station"]
+bus_subclasses = ["station_bus"]
 
-[asset_node_mapping]
+[asset_bus_mapping]
 generation_method = "geometry"
 storage_method = "geometry"
 prefer_same_admin = true
+voltage_preference = "high"
 
-[load_node_mapping]
+[load_bus_mapping]
 method = "geometry"
 prefer_same_admin = true
+voltage_preference = "high"
 
 [outputs]
 spatial = "spatial.parquet"
 population = "population.parquet"
 load = "load.nc"
 resource = "resource.nc"
-network_nodes = "network_nodes.parquet"
-network_branches = "network_branches.parquet"
-network_branch_cells = "network_branch_cells.parquet"
+network = "network"
 generation = "generation.parquet"
 storage = "storage.parquet"
-generation_node = "generation_node_mapping.parquet"
-storage_node = "storage_node_mapping.parquet"
-load_node = "load_node_mapping.parquet"

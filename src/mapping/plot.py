@@ -49,7 +49,7 @@ def plot_spatial(
     colors = {
         level: {
             "province": CELL_COLOR,
-            "marine_zone": "#79a8b8",
+            "marine_zone": "#b7c4c7",
         }.get(level, fallback[index])
         for index, level in enumerate(levels)
     }
@@ -61,8 +61,8 @@ def plot_spatial(
                 layer.boundary.plot(
                     ax=axis,
                     color=color,
-                    linewidth=0.2,
-                    alpha=0.85,
+                    linewidth=0.16,
+                    alpha=0.58,
                     zorder=2,
                 )
         draw_boundaries(axis, spatial, map_crs=map_crs, zorder=3)
@@ -268,25 +268,25 @@ def plot_network(
             data.branch_mapping["spatial_uid"].notna(), "spatial_uid"
         ].astype(str)
     )
-    node_cells = set(data.nodes["spatial_uid"].dropna().astype(str))
+    bus_cells = set(data.bus["spatial_uid"].dropna().astype(str))
     cells = cells.to_crs(map_crs)
     branch_area = cells.loc[cells["spatial_uid"].astype(str).isin(branch_cells)]
-    node_area = cells.loc[cells["spatial_uid"].astype(str).isin(node_cells)]
+    bus_area = cells.loc[cells["spatial_uid"].astype(str).isin(bus_cells)]
 
     figure, axes = map_axes(
-        spatial, figsize=(13, 10), china_inset=china_inset
+        spatial, china_inset=china_inset
     )
-    branches = data.branches.to_crs(map_crs)
-    node_layers = {}
-    for node_class, color, size, order in (
-        ("junction", "#596267", 0.1, 4),
-        ("station", "#d1495b", 0.45, 5),
+    branches = data.branch.to_crs(map_crs)
+    bus_layers = {}
+    for bus_subclass, color, size, marker, order in (
+        ("junction_bus", "#596267", 0.1, "o", 4),
+        ("station_bus", "#d1495b", 0.45, "o", 6),
     ):
-        node_layer = data.nodes.loc[
-            data.nodes["class"].eq(node_class)
+        bus_layer = data.bus.loc[
+            data.bus["subclass"].eq(bus_subclass)
         ].to_crs(map_crs)
-        node_layer["geometry"] = node_layer.geometry.representative_point()
-        node_layers[node_class] = (node_layer, color, size, order)
+        bus_layer["geometry"] = bus_layer.geometry.representative_point()
+        bus_layers[bus_subclass] = (bus_layer, color, size, marker, order)
     for index, axis in enumerate(axes):
         draw_background(axis, spatial, map_crs=map_crs, zorder=0)
         branch_area.plot(
@@ -297,7 +297,7 @@ def plot_network(
             alpha=0.8,
             zorder=1,
         )
-        node_area.plot(
+        bus_area.plot(
             ax=axis,
             color="#f8e6a5",
             edgecolor="#e3c75e",
@@ -312,11 +312,12 @@ def plot_network(
             alpha=0.75,
             zorder=3,
         )
-        for node_layer, color, size, order in node_layers.values():
-            node_layer.plot(
+        for bus_layer, color, size, marker, order in bus_layers.values():
+            bus_layer.plot(
                 ax=axis,
                 color=color,
                 markersize=size,
+                marker=marker,
                 alpha=0.6,
                 zorder=order,
             )
@@ -327,16 +328,17 @@ def plot_network(
                     Patch(facecolor="#dcecf3", edgecolor="#b8d7e5",
                           label="Branch cells"),
                     Patch(facecolor="#f8e6a5", edgecolor="#e3c75e",
-                          label="Node cells"),
+                          label="Bus cells"),
                     Line2D([0], [0], color="#276b91", label="Branches"),
                     Line2D([0], [0], marker="o", linestyle="none",
                            color="#596267", markersize=4,
-                           label="Junction nodes"),
+                           label="Junction buses"),
                     Line2D([0], [0], marker="o", linestyle="none",
                            color="#d1495b", markersize=5,
-                           label="Station nodes"),
+                           label="Station buses"),
                 ],
                 loc="lower left",
+                bbox_to_anchor=(0.095, 0.07),
                 ncol=2,
                 frameon=False,
                 fontsize=8,
@@ -344,8 +346,8 @@ def plot_network(
         finish_map(
             axis,
             (
-                f"Mapped largest connected network: {len(data.nodes):,} nodes, "
-                f"{len(data.branches):,} branches"
+                f"Mapped largest connected network: {len(data.bus):,} buses, "
+                f"{len(data.branch):,} branches"
                 if index == 0 else ""
             ),
         )

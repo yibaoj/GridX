@@ -223,16 +223,11 @@ def _weights(
         fallback = crosswalk["overlap_area_m2"] / crosswalk.groupby(
             "source_uid"
         )["overlap_area_m2"].transform("sum")
-        downscaling = crosswalk["source_area_m2"].gt(
-            crosswalk["target_area_m2"].median()
-        )
-        auxiliary_weights = np.where(
+        values = np.where(
             totals.gt(0),
             raw / totals.where(totals.gt(0), 1),
             fallback,
         )
-        area_weights = crosswalk["overlap_area_m2"] / crosswalk["source_area_m2"]
-        values = np.where(downscaling, auxiliary_weights, area_weights)
     elif quantity_kind == "extensive" and method == "linear":
         values = crosswalk["overlap_area_m2"] / crosswalk["source_area_m2"]
     elif quantity_kind == "intensive" and method == "linear":

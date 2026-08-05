@@ -1,9 +1,0 @@
-voltage_kv,r_ohm_per_km,x_ohm_per_km,c_nf_per_km,s_nom_mva_per_circuit,source,assumption_quality,notes
-220,0.050,0.488,8.9,490,https://opal-rt.atlassian.net/wiki/spaces/PDOCHS/pages/150307736,generic,"230 kV HYPERSIM impedance proxy; capacity uses the PyPSA/Siemens 220 kV twin-bundle order of magnitude."
-500,0.028,0.325,13.8,2350,https://opal-rt.atlassian.net/wiki/spaces/PDOCHS/pages/150307736,generic,"500 kV HYPERSIM impedance; capacity is a generic single-circuit planning rating."
-660,0.020,0.327,13.5,3500,https://opal-rt.atlassian.net/wiki/spaces/PDOCHS/pages/150307736,interpolated,"Interpolated between the 500 and 765 kV generic overhead-line assumptions."
-750,0.012,0.329,13.2,4400,https://opal-rt.atlassian.net/wiki/spaces/PDOCHS/pages/150307736,generic,"765 kV HYPERSIM impedance proxy; capacity is a generic single-circuit planning rating."
-800,0.012,0.329,13.2,5000,https://opal-rt.atlassian.net/wiki/spaces/PDOCHS/pages/150307736,proxy,"Uses the 765 kV AC proxy when OSM labels the branch AC; DC branches are represented as controllable links."
-1000,0.007,0.304,14.2,7000,https://opal-rt.atlassian.net/wiki/spaces/PDOCHS/pages/150307736,interpolated,"Interpolated between the 765 and 1100 kV generic overhead-line assumptions."
-1100,0.005,0.292,14.7,9000,https://opal-rt.atlassian.net/wiki/spaces/PDOCHS/pages/150307736,generic,"1100 kV HYPERSIM impedance; capacity is a generic UHV planning assumption."
-1150,0.005,0.292,14.7,9000,https://opal-rt.atlassian.net/wiki/spaces/PDOCHS/pages/150307736,proxy,"Uses the 1100 kV generic overhead-line assumption."

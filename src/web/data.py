@@ -135,11 +135,11 @@ class WebDataService:
     def _network(self) -> dict[str, Any]:
         network = self.mapping.load("network")
         threshold = float(self.config["data"]["network_min_voltage_kv"])
-        branch_voltage = network.branches["voltage_kv"].map(_max_voltage)
-        node_voltage = network.nodes["voltage_kv"].map(_max_voltage)
-        branches = network.branches.loc[branch_voltage.ge(threshold)].to_crs(4326)
-        nodes = network.nodes.loc[
-            node_voltage.ge(threshold) & network.nodes["class"].eq("station")
+        branch_voltage = pd.to_numeric(network.branch["voltage_kv"])
+        bus_voltage = pd.to_numeric(network.bus["voltage_kv"])
+        branches = network.branch.loc[branch_voltage.ge(threshold)].to_crs(4326)
+        buses = network.bus.loc[
+            bus_voltage.ge(threshold) & network.bus["subclass"].eq("station_bus")
         ].to_crs(4326)
         branches = branches.assign(
             voltage_max_kv=branch_voltage.loc[branches.index],
@@ -149,9 +149,9 @@ class WebDataService:
                 preserve_topology=True,
             ),
         )
-        nodes = nodes.assign(
-            voltage_max_kv=node_voltage.loc[nodes.index],
-            feature_kind="node",
+        buses = buses.assign(
+            voltage_max_kv=bus_voltage.loc[buses.index],
+            feature_kind="bus",
         )
         features = _geojson(
             branches,
@@ -166,13 +166,13 @@ class WebDataService:
         )["features"]
         features.extend(
             _geojson(
-                nodes,
+                buses,
                 ("uid", "feature_kind", "class", "subclass", "voltage_max_kv"),
             )["features"]
         )
         return _response(
             {"type": "FeatureCollection", "features": features},
-            count=len(nodes),
+            count=len(buses),
             secondary_count=len(branches),
             value=threshold,
         )

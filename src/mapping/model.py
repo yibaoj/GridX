@@ -24,8 +24,10 @@ MAPPING_IDS = (
 class MappedNetwork:
     """Largest connected network and its spatial-cell relationships."""
 
-    nodes: gpd.GeoDataFrame
-    branches: gpd.GeoDataFrame
+    bus: gpd.GeoDataFrame
+    branch: gpd.GeoDataFrame
+    transformer: gpd.GeoDataFrame
+    converter: gpd.GeoDataFrame
     branch_mapping: pd.DataFrame
 
     @property

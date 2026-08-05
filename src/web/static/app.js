@@ -173,7 +173,7 @@ function drawNetwork(geojson) {
   document.querySelector("#legend").hidden = true;
   return L.geoJSON(geojson, {
     style: feature => {
-      if (feature.properties.feature_kind === "node") return {};
+      if (feature.properties.feature_kind === "bus") return {};
       const dc = String(feature.properties.current_type || "").toUpperCase() === "DC";
       return { color: dc ? "#d6634a" : "#4879a8", weight: 1.25, opacity: 0.74, dashArray: dc ? "5 4" : null };
     },
@@ -185,7 +185,7 @@ function drawNetwork(geojson) {
       fillOpacity: 1,
     }),
     onEachFeature: (feature, layer) => layer.bindPopup(popup([
-      [feature.properties.feature_kind === "node" ? "节点" : "支路", feature.properties.uid],
+      [feature.properties.feature_kind === "bus" ? "母线" : "支路", feature.properties.uid],
       ["电压", `${formatNumber(feature.properties.voltage_max_kv)} kV`],
       ["类型", feature.properties.current_type || feature.properties.subclass || "--"],
     ])),
@@ -213,7 +213,7 @@ function updateInterface(metadata, summary) {
   document.querySelector("#layer-title").textContent = metadata.label;
   document.querySelector("#layer-description").textContent = metadata.description;
   document.querySelector("#record-count").textContent = metadata.id === "network"
-    ? `${formatNumber(summary.count)} nodes · ${formatNumber(summary.secondary_count)} branches`
+    ? `${formatNumber(summary.count)} buses · ${formatNumber(summary.secondary_count)} branches`
     : `${formatNumber(summary.count)} records`;
   document.querySelector("#value-total").textContent = summary.value == null
     ? metadata.unit

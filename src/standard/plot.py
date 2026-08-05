@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+import warnings
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import Normalize
 import numpy as np
 import pandas as pd
 from shapely.geometry import Polygon, box
@@ -25,10 +28,11 @@ DEFAULT_MAP_CRS = (
 )
 CHINA_MAIN_BOUNDS = (73.0, 17.0, 136.5, 54.5)
 CHINA_INSET_BOUNDS = (107.0, 2.0, 120.5, 23.0)
-LAND_COLOR = "#f1f2f2"
-MARINE_COLOR = "#e8f2f5"
-BOUNDARY_COLOR = "#9aa2a6"
-MARINE_BOUNDARY_COLOR = "#79a8b8"
+LAND_COLOR = "#f2f3f1"
+MARINE_COLOR = "#f7f9f9"
+BOUNDARY_COLOR = "#adb3b0"
+OUTER_BOUNDARY_COLOR = "#737c77"
+MARINE_BOUNDARY_COLOR = "#b5c2c6"
 CELL_COLOR = "#c7ccce"
 CONTINUOUS_CMAP = "viridis"
 CATEGORY_COLORS = {
@@ -68,8 +72,15 @@ CATEGORY_MARKERS = {
 def province_frame(spatial: gpd.GeoDataFrame | None) -> gpd.GeoDataFrame | None:
     if spatial is None or spatial.empty:
         return None
-    if "level" in spatial and spatial["level"].eq("province").any():
-        spatial = spatial.loc[spatial["level"].eq("province")]
+    if "level" in spatial:
+        provinces = spatial.loc[spatial["level"].eq("province")]
+        spatial = (
+            provinces
+            if not provinces.empty
+            else spatial.loc[~spatial["level"].eq("marine_zone")]
+        )
+    if spatial.empty:
+        return None
     result = spatial.copy()
     result["geometry"] = result.geometry.map(polygonal_geometry)
     return result.loc[~result.geometry.is_empty]
@@ -85,6 +96,45 @@ def marine_frame(spatial: gpd.GeoDataFrame | None) -> gpd.GeoDataFrame | None:
     return result.loc[~result.geometry.is_empty]
 
 
+def filter_spatial_levels(
+    data: gpd.GeoDataFrame,
+    spatial_levels: str | Iterable[str] | None,
+    *,
+    column: str = "level",
+) -> gpd.GeoDataFrame:
+    """Select requested spatial levels while preserving the original schema."""
+
+    if spatial_levels is None:
+        return data
+    levels = (
+        [spatial_levels]
+        if isinstance(spatial_levels, str)
+        else [str(level) for level in spatial_levels]
+    )
+    if not levels or len(levels) != len(set(levels)):
+        raise ValueError("spatial_levels must contain unique values.")
+    if column not in data:
+        raise KeyError(f"Spatial data have no {column!r} column.")
+    available = set(data[column].dropna().astype(str))
+    unknown = set(levels).difference(available)
+    if unknown:
+        raise ValueError(
+            f"Unknown spatial_levels={sorted(unknown)}; available={sorted(available)}."
+        )
+    return data.loc[data[column].astype(str).isin(levels)].copy()
+
+
+def _extent_frame(
+    spatial: gpd.GeoDataFrame | None,
+) -> gpd.GeoDataFrame | None:
+    if spatial is None or spatial.empty:
+        return None
+    result = spatial.copy()
+    result["geometry"] = result.geometry.map(polygonal_geometry)
+    result = result.loc[~result.geometry.is_empty]
+    return result if not result.empty else None
+
+
 def map_axes(
     spatial: gpd.GeoDataFrame | None,
     *,
@@ -93,13 +143,14 @@ def map_axes(
 ) -> tuple[Figure, list[plt.Axes]]:
     """Create a map canvas, adding a South China Sea inset only for China."""
 
-    figure, main_axis = plt.subplots(figsize=figsize, constrained_layout=True)
+    figure, main_axis = plt.subplots(figsize=figsize, constrained_layout=False)
+    figure.subplots_adjust(left=0.015, right=0.985, bottom=0.015, top=0.945)
     axes = [main_axis]
     use_inset = _is_national_china(spatial) and china_inset is not False
     main_axis._map_lonlat_bounds = CHINA_MAIN_BOUNDS if use_inset else None
     main_axis._map_is_inset = False
     if use_inset:
-        inset_axis = main_axis.inset_axes([0.815, 0.045, 0.145, 0.27])
+        inset_axis = main_axis.inset_axes([0.825, 0.075, 0.125, 0.225])
         inset_axis._map_lonlat_bounds = CHINA_INSET_BOUNDS
         inset_axis._map_is_inset = True
         axes.append(inset_axis)
@@ -134,7 +185,7 @@ def _set_axis_extent(
         return
     minx, miny, maxx, maxy = projected.total_bounds
     padding = max(maxx - minx, maxy - miny) * (
-        0.04 if getattr(axis, "_map_is_inset", False) else 0.025
+        0.025 if getattr(axis, "_map_is_inset", False) else 0.012
     )
     axis._map_projected_bounds = (
         minx - padding,
@@ -188,6 +239,7 @@ def add_asset_legends(
     class_legend = axis.legend(
         handles=class_handles,
         loc="lower left",
+        bbox_to_anchor=(0.095, 0.07),
         ncol=2,
         frameon=False,
         fontsize=8,
@@ -215,6 +267,7 @@ def add_asset_legends(
     axis.legend(
         handles=size_handles,
         loc="upper left",
+        bbox_to_anchor=(0.095, 0.88),
         frameon=False,
         fontsize=8,
         title="Total capacity",
@@ -231,17 +284,24 @@ def draw_background(
     zorder: int = 0,
 ) -> None:
     region = province_frame(spatial)
-    if region is None:
-        return
-    region = region.to_crs(map_crs)
-    region.plot(
-        ax=axis,
-        color=LAND_COLOR if fill else "none",
-        edgecolor=BOUNDARY_COLOR,
-        linewidth=0.45,
-        zorder=zorder,
-    )
-    _set_axis_extent(axis, province_frame(spatial), map_crs)
+    marine = marine_frame(spatial)
+    if marine is not None:
+        marine.to_crs(map_crs).plot(
+            ax=axis,
+            color=MARINE_COLOR if fill else "none",
+            edgecolor="none",
+            zorder=zorder,
+        )
+    if region is not None:
+        region.to_crs(map_crs).plot(
+            ax=axis,
+            color=LAND_COLOR if fill else "none",
+            edgecolor="none",
+            zorder=zorder + 0.1,
+        )
+    extent = _extent_frame(spatial)
+    if extent is not None:
+        _set_axis_extent(axis, extent, map_crs)
 
 
 def draw_boundaries(
@@ -256,8 +316,8 @@ def draw_boundaries(
         marine.to_crs(map_crs).boundary.plot(
             ax=axis,
             color=MARINE_BOUNDARY_COLOR,
-            linewidth=0.55,
-            alpha=0.9,
+            linewidth=0.42,
+            alpha=0.65,
             zorder=zorder,
         )
     region = province_frame(spatial)
@@ -266,15 +326,29 @@ def draw_boundaries(
         region.boundary.plot(
             ax=axis,
             color=BOUNDARY_COLOR,
-            linewidth=0.45,
-            alpha=0.9,
+            linewidth=0.34,
+            alpha=0.82,
             zorder=zorder,
+        )
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="invalid value encountered in unary_union",
+                category=RuntimeWarning,
+            )
+            outer_boundary = polygonal_geometry(region.geometry.union_all())
+        gpd.GeoSeries([outer_boundary], crs=region.crs).boundary.plot(
+            ax=axis,
+            color=OUTER_BOUNDARY_COLOR,
+            linewidth=0.68,
+            alpha=0.92,
+            zorder=zorder + 0.1,
         )
 
 
 def finish_map(axis: plt.Axes, title: str = "") -> None:
     if title:
-        axis.set_title(title, color="#263238", pad=8, fontsize=12)
+        axis.set_title(title, color="#263238", pad=2, fontsize=11)
     bounds = getattr(axis, "_map_projected_bounds", None)
     if bounds is not None:
         axis.set_xlim(bounds[:2])
@@ -305,9 +379,16 @@ def continuous_map(
 ) -> Figure:
     figure, axes = map_axes(spatial, china_inset=china_inset)
     frame = frame.to_crs(map_crs)
+    values = pd.to_numeric(frame[value_column], errors="coerce")
+    lower = float(values.min()) if vmin is None else float(vmin)
+    upper = float(values.max()) if vmax is None else float(vmax)
+    if not np.isfinite(lower) or not np.isfinite(upper):
+        lower, upper = 0.0, 1.0
+    if upper <= lower:
+        upper = lower + 1.0
+    normalizer = Normalize(lower, upper)
     for index, axis in enumerate(axes):
         draw_background(axis, spatial, map_crs=map_crs, zorder=0)
-        existing_axes = set(figure.axes)
         frame.plot(
             ax=axis,
             column=value_column,
@@ -317,21 +398,20 @@ def continuous_map(
             linewidth=0,
             edgecolor="none",
             markersize=5,
-            legend=index == 0,
-            legend_kwds={
-                "label": label,
-                "location": "left",
-                "shrink": 0.48,
-                "aspect": 24,
-                "pad": 0.015,
-            },
+            legend=False,
             missing_kwds={"color": "#e4e6e6"},
             zorder=2,
         )
         if index == 0:
-            for colorbar_axis in set(figure.axes).difference(existing_axes):
-                colorbar_axis.tick_params(labelsize=7, length=2)
-                colorbar_axis.yaxis.label.set_size(8)
+            colorbar_axis = axis.inset_axes([0.095, 0.18, 0.014, 0.22])
+            colorbar = figure.colorbar(
+                ScalarMappable(norm=normalizer, cmap=CONTINUOUS_CMAP),
+                cax=colorbar_axis,
+            )
+            colorbar.set_label(label, fontsize=8, labelpad=4)
+            colorbar.ax.tick_params(labelsize=7, length=2)
+            colorbar.ax.yaxis.set_ticks_position("left")
+            colorbar.ax.yaxis.set_label_position("left")
         draw_boundaries(axis, spatial, map_crs=map_crs, zorder=4)
         finish_map(axis, title if index == 0 else "")
     return figure
@@ -435,27 +515,11 @@ def plot_spatial(
     """Plot standardized land and marine spatial units."""
 
     figure, axes = map_axes(data, china_inset=china_inset)
-    provinces = province_frame(data).to_crs(map_crs)
-    marine = marine_frame(data)
-    if marine is not None:
-        marine = marine.to_crs(map_crs)
     other_levels = data.loc[
         ~data["level"].isin(["province", "marine_zone"])
     ].to_crs(map_crs)
     for index, axis in enumerate(axes):
-        if marine is not None:
-            marine.plot(
-                ax=axis,
-                color=MARINE_COLOR,
-                edgecolor=MARINE_BOUNDARY_COLOR,
-                linewidth=0.55,
-            )
-        provinces.plot(
-            ax=axis,
-            color=LAND_COLOR,
-            edgecolor=BOUNDARY_COLOR,
-            linewidth=0.55,
-        )
+        draw_background(axis, data, map_crs=map_crs, zorder=0)
         if not other_levels.empty:
             other_levels.boundary.plot(
                 ax=axis,
@@ -463,7 +527,7 @@ def plot_spatial(
                 linewidth=0.65,
                 alpha=0.9,
             )
-        draw_background(axis, data, map_crs=map_crs, fill=False, zorder=2)
+        draw_boundaries(axis, data, map_crs=map_crs, zorder=3)
         finish_map(
             axis,
             f"Standard spatial units ({len(data):,})" if index == 0 else "",
@@ -479,22 +543,24 @@ def plot_network(
     china_inset: bool | None = None,
     **_: object,
 ) -> Figure:
-    """Plot all standardized network nodes and branches."""
+    """Plot standardized buses, branches, transformers, and converters."""
 
-    figure, axes = map_axes(
-        spatial, figsize=(13, 10), china_inset=china_inset
-    )
-    branches = data.branches.to_crs(map_crs)
-    node_layers = {}
-    for node_class, color, size, order in (
-        ("junction", "#596267", 0.1, 3),
-        ("station", "#d1495b", 0.45, 4),
+    figure, axes = map_axes(spatial, china_inset=china_inset)
+    branches = data.branch.to_crs(map_crs)
+    bus_layers = {}
+    for bus_subclass, color, size, marker, order in (
+        ("junction_bus", "#596267", 0.1, "o", 3),
+        ("station_bus", "#d1495b", 0.45, "o", 5),
     ):
-        node_layer = data.nodes.loc[
-            data.nodes["class"].eq(node_class)
+        bus_layer = data.bus.loc[
+            data.bus["subclass"].eq(bus_subclass)
         ].to_crs(map_crs)
-        node_layer["geometry"] = node_layer.geometry.representative_point()
-        node_layers[node_class] = (node_layer, color, size, order)
+        bus_layer["geometry"] = bus_layer.geometry.representative_point()
+        bus_layers[bus_subclass] = (bus_layer, color, size, marker, order)
+    equipment_layers = (
+        (data.transformer.to_crs(map_crs), "#c47a2c", "D", 5),
+        (data.converter.to_crs(map_crs), "#7a5195", "s", 6),
+    )
     for index, axis in enumerate(axes):
         draw_background(axis, spatial, map_crs=map_crs, zorder=0)
         branches.plot(
@@ -504,33 +570,47 @@ def plot_network(
             alpha=0.62,
             zorder=2,
         )
-        for node_layer, color, size, order in node_layers.values():
-            node_layer.plot(
+        for bus_layer, color, size, marker, order in bus_layers.values():
+            bus_layer.plot(
                 ax=axis,
                 color=color,
                 markersize=size,
+                marker=marker,
                 alpha=0.58,
                 zorder=order,
             )
+        for equipment, color, marker, order in equipment_layers:
+            if not equipment.empty:
+                equipment.assign(
+                    geometry=equipment.geometry.representative_point()
+                ).plot(ax=axis, color=color, markersize=0.35, marker=marker,
+                       alpha=0.65, zorder=order)
         if index == 0:
             axis.legend(
                 handles=[
                     Line2D([0], [0], color="#4e79a7", label="Branches"),
                     Line2D([0], [0], marker="o", linestyle="none",
                            color="#596267", markersize=4,
-                           label="Junction nodes"),
+                           label="Junction buses"),
+                    Line2D([0], [0], marker="D", linestyle="none",
+                           color="#c47a2c", markersize=4,
+                           label="Transformers"),
+                    Line2D([0], [0], marker="s", linestyle="none",
+                           color="#7a5195", markersize=4,
+                           label="Converters"),
                     Line2D([0], [0], marker="o", linestyle="none",
                            color="#d1495b", markersize=5,
-                           label="Station nodes"),
+                           label="Station buses"),
                 ],
                 loc="lower left",
+                bbox_to_anchor=(0.095, 0.015),
                 frameon=False,
             )
         finish_map(
             axis,
             (
-                f"Standard network: {len(data.nodes):,} nodes, "
-                f"{len(data.branches):,} branches"
+                f"Standard network: {len(data.bus):,} buses, "
+                f"{len(data.branch):,} branches"
                 if index == 0 else ""
             ),
         )
@@ -694,15 +774,15 @@ def plot_parameter(data: pd.DataFrame, **_: object) -> Figure:
     """Plot parameter coverage by standardized asset class."""
 
     frame = data.loc[
-        data["class"].notna() & data["parameter_name"].notna(),
-        ["class", "parameter_name"],
+        data["class"].notna() & data["name"].notna(),
+        ["class", "name"],
     ]
-    coverage = pd.crosstab(frame["class"], frame["parameter_name"])
+    coverage = pd.crosstab(frame["class"], frame["name"])
     figure, axis = plt.subplots(figsize=(12, 6.5), constrained_layout=True)
     image = axis.imshow(coverage, cmap=CONTINUOUS_CMAP, aspect="auto")
     axis.set_xticks(range(len(coverage.columns)), coverage.columns, rotation=60)
     axis.set_yticks(range(len(coverage.index)), coverage.index)
-    axis.set_title("Technical-economic parameter coverage")
+    axis.set_title("Parameter coverage")
     figure.colorbar(image, ax=axis, label="Parameter records")
     return figure
 
