@@ -47,3 +47,32 @@ doe_thermal_sensible,60,doe,,^Sensible heat$,,storage,thermal_storage,sensible_h
 doe_thermal_other,70,doe,,^Heat thermal storage$,,storage,thermal_storage,other_thermal
 doe_capacitor,80,doe,,^Electro-chemical capacitor$,,storage,capacitor_storage,electrochemical_capacitor
 doe_storage_fallback,90,doe,,.*,,storage,other_storage,
+pypsa_coal,10,pypsa_technology_costs,,^coal$,,generation,coal,
+pypsa_lignite,20,pypsa_technology_costs,,^lignite$,,generation,coal,lignite
+pypsa_ccgt,30,pypsa_technology_costs,,^CCGT$,,generation,gas,combined_cycle
+pypsa_ocgt,40,pypsa_technology_costs,,^OCGT$,,generation,gas,gas_turbine
+pypsa_gas,50,pypsa_technology_costs,,^gas$,,generation,gas,
+pypsa_oil,60,pypsa_technology_costs,,^oil$,,generation,other,oil
+pypsa_solid_biomass,70,pypsa_technology_costs,,^solid biomass$,,generation,bioenergy,
+pypsa_biomass,75,pypsa_technology_costs,,^biomass$,,generation,bioenergy,
+pypsa_biogas,80,pypsa_technology_costs,,^biogas$,,generation,bioenergy,biogas
+pypsa_geothermal,90,pypsa_technology_costs,,^geothermal(?:_nrel)?$,,generation,geothermal,
+pypsa_nuclear,100,pypsa_technology_costs,,^nuclear$,,generation,nuclear,
+pypsa_hydro,110,pypsa_technology_costs,,^hydro$,,generation,hydropower,reservoir
+pypsa_ror,120,pypsa_technology_costs,,^ror$,,generation,hydropower,run_of_river
+pypsa_phs,130,pypsa_technology_costs,,^PHS$,,storage,pumped_storage,pumped_hydro
+pypsa_solar_utility,140,pypsa_technology_costs,,^solar-utility$,,generation,solar,utility_scale_pv
+pypsa_solar_thermal,150,pypsa_technology_costs,,^solar_thermal_nrel$,,generation,solar,solar_thermal
+pypsa_onwind,160,pypsa_technology_costs,,^onwind$,,generation,wind,onshore
+pypsa_offwind,170,pypsa_technology_costs,,^offwind$,,generation,wind,offshore_fixed
+pypsa_battery_inverter,180,pypsa_technology_costs,,^battery inverter$,,storage,battery_storage,
+pypsa_battery_storage,190,pypsa_technology_costs,,^battery storage$,,storage,battery_storage,
+pypsa_compressed_air_bicharger,200,pypsa_technology_costs,,^compressed-air-adiabatic-bicharger$,,storage,compressed_air_storage,compressed_air
+pypsa_compressed_air_store,210,pypsa_technology_costs,,^compressed-air-adiabatic-store$,,storage,compressed_air_storage,compressed_air
+pypsa_hvac_overhead,220,pypsa_technology_costs,,^HVAC overhead$,,network,branch,ac_overhead_line
+pypsa_hvac_submarine,230,pypsa_technology_costs,,^HVAC submarine$,,network,branch,ac_cable
+pypsa_hvac_underground,240,pypsa_technology_costs,,^HVAC underground$,,network,branch,ac_cable
+pypsa_hvdc_overhead,250,pypsa_technology_costs,,^HVDC overhead$,,network,branch,dc_overhead_line
+pypsa_hvdc_submarine,260,pypsa_technology_costs,,^HVDC submarine$,,network,branch,dc_cable
+pypsa_hvdc_underground,270,pypsa_technology_costs,,^HVDC underground$,,network,branch,dc_cable
+pypsa_hvdc_inverter_pair,280,pypsa_technology_costs,,^HVDC inverter pair$,,network,converter,ac_dc_converter

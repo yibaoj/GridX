@@ -60,26 +60,10 @@ class_mapping_file = "config/class_mapping.csv"
 
 [datasets.parameter]
 processor = "parameter"
-source_ids = [
-  "pypsa_technology_costs",
-  "technical_economic_assumptions",
-  "operational_assumptions",
-  "pandapower_standard_types",
-  "china_fuel_prices_2025",
-  "opal_rt_line_assumptions",
-]
 outputs = { data = "parameter.parquet", report = "parameter_validation_report.json" }
 
 [datasets.parameter.options]
-technology_data_source_id = "pypsa_technology_costs"
-technical_assumptions_source_id = "technical_economic_assumptions"
-supplemental_source_ids = [
-  "operational_assumptions",
-  "pandapower_standard_types",
-  "china_fuel_prices_2025",
-]
-line_assumptions_source_id = "opal_rt_line_assumptions"
-pypsa_year = 2025
+class_mapping_file = "config/class_mapping.csv"
 default_priority = 100
 conflict_tolerance = 1e-6
 name_aliases = {}
@@ -94,6 +78,45 @@ quality_order = [
   "low",
   "model_default",
 ]
+
+[[datasets.parameter.options.sources]]
+source_id = "pypsa_technology_costs"
+adapter = "long_table"
+source_uid_columns = ["technology", "parameter"]
+source_uid_suffix = "2025"
+name_column = "parameter"
+technology_column = "technology"
+notes_column = "further description"
+reference_url_column = "source"
+quality = "source"
+observed_at = "2025"
+valid_from = "2025"
+
+[[datasets.parameter.options.sources]]
+source_id = "model_assumptions"
+adapter = "long_table"
+
+[[datasets.parameter.options.sources]]
+source_id = "pandapower_standard_types"
+adapter = "long_table"
+
+[[datasets.parameter.options.sources]]
+source_id = "china_fuel_prices_2025"
+adapter = "long_table"
+
+[[datasets.parameter.options.sources]]
+source_id = "opal_rt_line_assumptions"
+adapter = "wide_table"
+source_uid_columns = ["voltage_kv"]
+applies_to_dataset = "network"
+class = "branch"
+subclass = "ac_overhead_line"
+voltage_column = "voltage_kv"
+quality_column = "assumption_quality"
+notes_column = "notes"
+reference_url_column = "source"
+observed_at = "2026-08-04"
+parameters = { r_ohm_per_km = "ohm/km", x_ohm_per_km = "ohm/km", c_nf_per_km = "nF/km", s_nom_mva_per_circuit = "MVA/circuit" }
 
 [datasets.load]
 processor = "load"

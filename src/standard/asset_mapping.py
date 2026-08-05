@@ -34,8 +34,12 @@ class _GemMixin:
             raise ValueError(
                 "Asset mapping priorities must be unique within each source."
             )
-        if not rules["dataset"].isin({"generation", "storage"}).all():
-            raise ValueError("Asset mapping dataset must be generation or storage.")
+        if not rules["dataset"].isin(
+            {"network", "generation", "storage"}
+        ).all():
+            raise ValueError(
+                "Asset mapping dataset must be network, generation, or storage."
+            )
         if rules["class"].eq("").any():
             raise ValueError("Asset mapping class values must be present.")
         for column in (

@@ -88,11 +88,13 @@ def build_electrical_network(
             key=lambda row: (float(row["voltage_kv"]), str(row["current_type"])),
         )
         for lower, upper in zip(ordered[:-1], ordered[1:], strict=True):
-            kind = (
-                "transformer"
-                if lower["current_type"] == upper["current_type"] == "AC"
-                else "converter"
-            )
+            currents = {lower["current_type"], upper["current_type"]}
+            if currents == {"AC"}:
+                kind = "transformer"
+            elif currents == {"AC", "DC"}:
+                kind = "converter"
+            else:
+                continue
             node = node_by_uid.loc[node_uid]
             from_current = str(lower["current_type"])
             to_current = str(upper["current_type"])
@@ -107,7 +109,7 @@ def build_electrical_network(
                 "class": kind,
                 "subclass": (
                     "ac_transformer" if kind == "transformer"
-                    else f"{from_current.lower()}_{to_current.lower()}_converter"
+                    else "ac_dc_converter"
                 ),
                 "status": node["status"],
                 "from_bus_uid": lower["uid"],
@@ -210,3 +212,12 @@ def _validate_electrical_network(
         )
         if not endpoints <= set(bus["uid"]):
             raise ValueError("Inferred equipment references a missing bus.")
+    if not converter.empty:
+        current_pairs = converter.apply(
+            lambda row: {row["from_current_type"], row["to_current_type"]},
+            axis=1,
+        )
+        if not current_pairs.map(lambda pair: pair == {"AC", "DC"}).all():
+            raise ValueError("Every inferred converter must connect AC and DC buses.")
+        if not converter["subclass"].eq("ac_dc_converter").all():
+            raise ValueError("Converter subclass must be ac_dc_converter.")

@@ -80,12 +80,13 @@ class StandardDataManager:
         rows = []
         for dataset_id in self._select(dataset_ids):
             config = self.datasets[dataset_id]
-            source_report = self.raw_data.check(config["source_ids"])
+            source_ids = self._source_ids(dataset_id)
+            source_report = self.raw_data.check(source_ids)
             outputs = self._output_paths(dataset_id)
             rows.append({
                 "dataset_id": dataset_id,
                 "processor": config["processor"],
-                "source_ids": tuple(config["source_ids"]),
+                "source_ids": tuple(source_ids),
                 "sources_available": bool(source_report["exists"].all()),
                 "source_status": "; ".join(
                     f"{source}:{status}"
@@ -104,7 +105,7 @@ class StandardDataManager:
         results = {}
         for dataset_id in selected:
             missing_sources = self.raw_data.check(
-                self.datasets[dataset_id]["source_ids"]
+                self._source_ids(dataset_id)
             ).query("not exists")
             if not missing_sources.empty:
                 raise FileNotFoundError(
@@ -234,6 +235,15 @@ class StandardDataManager:
         if unknown:
             raise KeyError(f"Unknown dataset_id values: {sorted(unknown)}")
         return selected
+
+    def _source_ids(self, dataset_id: str) -> list[str]:
+        """Return raw dependencies declared directly or by source adapters."""
+
+        config = self.datasets[dataset_id]
+        if "source_ids" in config:
+            return list(config["source_ids"])
+        specs = config.get("options", {}).get("sources", ())
+        return list(dict.fromkeys(str(spec["source_id"]) for spec in specs))
 
     def _output_paths(self, dataset_id: str) -> list[Path]:
         config = self.datasets[dataset_id]

@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from .base import _Standardizer
-from .schema import _finalize_frame, _numeric, _write_dataframe, time_bounds
+from .schema import _finalize_frame, _write_dataframe, time_bounds
 
 
 PARAMETER_GROUPS = ("technical", "economic", "environmental", "others")
@@ -261,64 +261,37 @@ def as_parameter_data(data: pd.DataFrame) -> ParameterData:
 
 
 class _ParameterStandardizer(_Standardizer):
-    _TECHNOLOGY_CLASS_FALLBACKS = {
-        "coal": ("generation", "coal", pd.NA, "coal"),
-        "lignite": ("generation", "coal", pd.NA, "lignite"),
-        "gas": ("generation", "gas", pd.NA, "gas"),
-        "oil": ("generation", "other", pd.NA, "oil"),
-        "solid biomass": ("generation", "bioenergy", pd.NA, "biomass"),
-        "biogas": ("generation", "bioenergy", "biogas", "biogas"),
-        "geothermal": ("generation", "geothermal", pd.NA, "geothermal"),
-        "battery inverter": ("storage", "battery_storage", pd.NA, pd.NA),
-        "battery storage": ("storage", "battery_storage", pd.NA, pd.NA),
-        "compressed-air-adiabatic-bicharger": (
-            "storage", "compressed_air_storage", "compressed_air", pd.NA
-        ),
-        "compressed-air-adiabatic-store": (
-            "storage", "compressed_air_storage", "compressed_air", pd.NA
-        ),
-        "hvac overhead": ("network", "branch", "ac_overhead_line", pd.NA),
-        "hvac submarine": ("network", "branch", "ac_cable", pd.NA),
-        "hvac underground": ("network", "branch", "ac_cable", pd.NA),
-        "hvdc overhead": ("network", "branch", "dc_overhead_line", pd.NA),
-        "hvdc submarine": ("network", "branch", "dc_cable", pd.NA),
-        "hvdc underground": ("network", "branch", "dc_cable", pd.NA),
-        "hvdc inverter pair": (
-            "network", "converter", "ac_dc_converter", pd.NA
-        ),
-    }
-    _PARAMETERS = {
-        "committable": ("boolean", "technical"),
-        "minimum_output_pu": ("p.u.", "technical"),
-        "ramp_up_pu_per_hour": ("p.u./h", "technical"),
-        "ramp_down_pu_per_hour": ("p.u./h", "technical"),
-        "minimum_up_time_h": ("h", "technical"),
-        "minimum_down_time_h": ("h", "technical"),
-        "startup_time_h": ("h", "technical"),
-        "efficiency_override": ("p.u.", "technical"),
-        "startup_cost_eur_per_mw": ("EUR/MW", "economic"),
-        "shutdown_cost_eur_per_mw": ("EUR/MW", "economic"),
+    _MAPPING_COLUMNS = {
+        "rule_id", "priority", "source", "source_type_pattern",
+        "technology_pattern", "fuel_pattern", "dataset", "class", "subclass",
     }
 
     def build(self) -> pd.DataFrame:
-        assumptions = self._read_technical_assumptions()
-        rows = self._technical_rows(assumptions)
-        rows.extend(self._technology_data_rows(assumptions))
-        for source_id in self.options.get("supplemental_source_ids", ()):
-            rows.extend(self._long_form_rows(source_id))
-        line_source = self.options.get("line_assumptions_source_id")
-        if line_source:
-            rows.extend(self._line_assumption_rows(line_source))
+        adapters = {
+            "long_table": self._long_table_rows,
+            "wide_table": self._wide_table_rows,
+        }
+        specs = self._source_specs(adapters)
+        rows = [
+            row
+            for spec in specs
+            for row in adapters[str(spec["adapter"])](spec)
+        ]
 
         frame = self._normalize_rows(pd.DataFrame(rows))
+        frame = frame.reindex(sorted(frame.columns), axis=1)
+        frame = frame.sort_values("uid", kind="stable").reset_index(drop=True)
+        string_columns = (
+            "source_name", "quality", "notes", "reference_url",
+            "source_provider", "location", "scope", "standard_type",
+            "pypsa_technology", "fuel_technology", "fuel", "currency_year",
+            "selector_json", "scenario", "derivation",
+        )
         result = _finalize_frame(
             frame,
             schema_id="parameter",
-            string_columns=(
-                "source_name", "quality", "notes", "reference_url",
-                "source_provider", "location", "scope", "standard_type",
-                "pypsa_technology", "fuel_technology", "fuel", "currency_year",
-                "selector_json", "scenario", "derivation",
+            string_columns=tuple(
+                column for column in string_columns if column in frame
             ),
         )
         result["priority"] = pd.to_numeric(
@@ -348,6 +321,33 @@ class _ParameterStandardizer(_Standardizer):
             )
         _write_dataframe(result, self.output("data"))
         return result
+
+    def _source_specs(
+        self,
+        adapters: Mapping[str, object],
+    ) -> list[Mapping[str, object]]:
+        specs = self.options.get("sources", ())
+        if not specs:
+            raise ValueError("parameter.options.sources must not be empty.")
+        source_ids = []
+        for spec in specs:
+            if not isinstance(spec, Mapping):
+                raise TypeError("Each parameter source must be a TOML table.")
+            missing = {"source_id", "adapter"}.difference(spec)
+            if missing:
+                raise ValueError(
+                    f"Parameter source is missing: {sorted(missing)}"
+                )
+            source_id = str(spec["source_id"])
+            adapter = str(spec["adapter"])
+            if adapter not in adapters:
+                raise ValueError(
+                    f"Unknown parameter adapter {adapter!r} for {source_id!r}."
+                )
+            source_ids.append(source_id)
+        if len(source_ids) != len(set(source_ids)):
+            raise ValueError("Each parameter source_id must be configured once.")
+        return list(specs)
 
     def _normalize_rows(self, frame: pd.DataFrame) -> pd.DataFrame:
         default_priority = int(self.options.get("default_priority", 100))
@@ -402,203 +402,225 @@ class _ParameterStandardizer(_Standardizer):
         ] = frame.get("notes")
         return frame
 
-    def _read_technical_assumptions(self) -> pd.DataFrame:
-        source_id = self.options["technical_assumptions_source_id"]
-        assumptions = pd.read_csv(self.source(source_id))
-        required = {"assumption_id", "applies_to_dataset", "class", "subclass"}
-        missing = required.difference(assumptions.columns)
-        if missing:
-            raise ValueError(
-                "Technical-economic assumptions are missing columns: "
-                + ", ".join(sorted(missing))
-            )
-        if assumptions["assumption_id"].isna().any() or assumptions[
-            "assumption_id"
-        ].duplicated().any():
-            raise ValueError("assumption_id values must be present and unique.")
-        return assumptions
-
-    def _technical_rows(self, assumptions: pd.DataFrame) -> list[dict]:
-        source_id = self.options["technical_assumptions_source_id"]
-        rows = []
-        for _, row in assumptions.iterrows():
-            for name, (unit, group) in self._PARAMETERS.items():
-                if name not in assumptions or pd.isna(row.get(name)):
-                    continue
-                evidence_group = group
-                reference_url = _first_value(
-                    row.get(f"{evidence_group}_source"),
-                    row.get("technical_source"),
-                    row.get("economic_source"),
-                    self.manager.raw_data.catalog.loc[source_id, "source_url"],
-                )
-                rows.append({
-                    **self._required_fields(
-                        source_id,
-                        str(row["assumption_id"]),
-                        row.get("applies_to_dataset"),
-                        row.get("class"),
-                        row.get("subclass"),
-                    ),
-                    "uid": f"{source_id}:{row['assumption_id']}:{name}",
-                    "name": name,
-                    "source_name": name,
-                    "group": group,
-                    "value": float(row[name]),
-                    "unit": unit,
-                    "capacity_min_mw": _numeric(row.get("capacity_min_mw")),
-                    "capacity_max_mw": _numeric(row.get("capacity_max_mw")),
-                    "quality": row.get(f"{evidence_group}_quality"),
-                    "notes": row.get(f"{evidence_group}_notes"),
-                    "reference_url": reference_url,
-                    "source_provider": _provider(reference_url),
-                    "pypsa_technology": row.get("pypsa_technology"),
-                    "fuel_technology": row.get("fuel_technology"),
-                })
-        return rows
-
-    def _technology_data_rows(
-        self, assumptions: pd.DataFrame
+    def _long_table_rows(
+        self,
+        spec: Mapping[str, object],
     ) -> list[dict]:
-        source_id = self.options["technology_data_source_id"]
-        costs = pd.read_csv(self.source(source_id))
-        mapping = (
-            assumptions.dropna(subset=["pypsa_technology"])
-            .drop_duplicates("pypsa_technology")
-            .set_index("pypsa_technology")
-        )
-        rows = []
-        for _, row in costs.iterrows():
-            value = pd.to_numeric(row.get("value"), errors="coerce")
-            if pd.isna(value):
-                continue
-            technology = row.get("technology")
-            match = mapping.loc[technology] if technology in mapping.index else None
-            fallback = self._TECHNOLOGY_CLASS_FALLBACKS.get(
-                str(technology).lower()
-            )
-            source_uid = (
-                f"{technology}:{row.get('parameter')}:{self.options['pypsa_year']}"
-            )
-            rows.append({
-                **self._required_fields(
-                    source_id,
-                    source_uid,
-                    match.get("applies_to_dataset") if match is not None else (
-                        fallback[0] if fallback else pd.NA
-                    ),
-                    match.get("class") if match is not None else (
-                        fallback[1] if fallback else pd.NA
-                    ),
-                    match.get("subclass") if match is not None else (
-                        fallback[2] if fallback else pd.NA
-                    ),
-                ),
-                "name": row.get("parameter"),
-                "source_name": row.get("parameter"),
-                "group": _parameter_group(row.get("parameter")),
-                "value": float(value),
-                "unit": row.get("unit"),
-                "capacity_min_mw": pd.NA,
-                "capacity_max_mw": pd.NA,
-                "quality": "source",
-                "notes": row.get("further description"),
-                "reference_url": _first_value(
-                    row.get("source"),
-                    self.manager.raw_data.catalog.loc[source_id, "source_url"],
-                ),
-                "source_provider": "PyPSA technology-data",
-                "pypsa_technology": technology,
-                "fuel_technology": (
-                    match.get("fuel_technology") if match is not None else (
-                        fallback[3] if fallback else pd.NA
-                    )
-                ),
-                "currency_year": row.get("currency_year"),
-            })
-        return rows
-
-    def _long_form_rows(self, source_id: str) -> list[dict]:
+        source_id = str(spec["source_id"])
         frame = pd.read_csv(self.source(source_id))
-        required = {"source_uid", "parameter_name", "value", "unit"}
+        name_column = str(spec.get("name_column", "parameter_name"))
+        value_column = str(spec.get("value_column", "value"))
+        unit_column = str(spec.get("unit_column", "unit"))
+        required = {name_column, value_column, unit_column}
         missing = required.difference(frame.columns)
         if missing:
             raise ValueError(
-                f"{source_id} is missing parameter columns: "
-                + ", ".join(sorted(missing))
+                f"{source_id} is missing long-table columns: {sorted(missing)}"
             )
-        provider = self.manager.raw_data.catalog.loc[source_id, "provider"]
+        rule_sets = self._mapping_rule_sets(spec)
         rows = []
         for _, row in frame.iterrows():
-            value = pd.to_numeric(row.get("value"), errors="coerce")
+            value = pd.to_numeric(row.get(value_column), errors="coerce")
             if pd.isna(value):
                 continue
+            source_uid = self._source_uid(row, spec)
+            dataset, asset_class, subclass, rule_id = self._classify(
+                row, spec, rule_sets
+            )
             data = row.to_dict()
-            data.pop("parameter_name", None)
+            data.pop(name_column, None)
             data.pop("parameter_group", None)
-            data["source_name"] = row.get("parameter_name")
-            data["name"] = row.get("parameter_name")
+            data["source_name"] = row.get(name_column)
+            data["name"] = row.get(name_column)
             data.update(self._required_fields(
                 source_id,
-                str(row["source_uid"]),
-                row.get("applies_to_dataset"),
-                row.get("class"),
-                row.get("subclass"),
-                applies_to_uid=row.get("applies_to_uid"),
-                status=row.get("status"),
-                observed_at=row.get("observed_at"),
-                valid_from=row.get("valid_from"),
-                valid_to=row.get("valid_to"),
+                source_uid,
+                dataset,
+                asset_class,
+                subclass,
+                applies_to_uid=self._source_value(row, spec, "applies_to_uid"),
+                status=self._source_value(row, spec, "status"),
+                observed_at=self._source_value(row, spec, "observed_at"),
+                valid_from=self._source_value(row, spec, "valid_from"),
+                valid_to=self._source_value(row, spec, "valid_to"),
             ))
             data["value"] = float(value)
-            data["group"] = _parameter_group(row.get("parameter_name"))
-            if pd.isna(data.get("source_provider")):
-                data["source_provider"] = provider
+            data["unit"] = row.get(unit_column)
+            data["mapping_rule_id"] = rule_id
+            self._canonical_metadata(data, row, spec)
             rows.append(data)
         return rows
 
-    def _line_assumption_rows(self, source_id: str) -> list[dict]:
+    def _wide_table_rows(
+        self,
+        spec: Mapping[str, object],
+    ) -> list[dict]:
+        source_id = str(spec["source_id"])
         frame = pd.read_csv(self.source(source_id))
-        parameter_units = {
-            "r_ohm_per_km": "ohm/km",
-            "x_ohm_per_km": "ohm/km",
-            "c_nf_per_km": "nF/km",
-            "s_nom_mva_per_circuit": "MVA/circuit",
-        }
-        required = {"voltage_kv", "source", "assumption_quality", *parameter_units}
+        parameter_units = dict(spec.get("parameters", {}))
+        if not parameter_units:
+            raise ValueError(f"{source_id} wide_table requires parameters.")
+        id_columns = list(spec.get("source_uid_columns", ()))
+        required = {*id_columns, *parameter_units}
         missing = required.difference(frame.columns)
         if missing:
             raise ValueError(
-                f"{source_id} is missing line-assumption columns: {sorted(missing)}"
+                f"{source_id} is missing wide-table columns: {sorted(missing)}"
             )
+        rule_sets = self._mapping_rule_sets(spec)
         rows = []
         for _, row in frame.iterrows():
-            voltage = float(row["voltage_kv"])
             for name, unit in parameter_units.items():
-                source_uid = f"voltage:{voltage:g}:{name}"
-                quality = row["assumption_quality"]
-                rows.append({
+                value = pd.to_numeric(row.get(name), errors="coerce")
+                if pd.isna(value):
+                    continue
+                dataset, asset_class, subclass, rule_id = self._classify(
+                    row, spec, rule_sets
+                )
+                source_uid = self._source_uid(row, spec, suffix=name)
+                data = {
                     **self._required_fields(
-                        source_id,
-                        source_uid,
-                        "network",
-                        "branch",
-                        "ac_overhead_line",
+                        source_id, source_uid, dataset, asset_class, subclass,
+                        observed_at=self._source_value(row, spec, "observed_at"),
+                        valid_from=self._source_value(row, spec, "valid_from"),
+                        valid_to=self._source_value(row, spec, "valid_to"),
                     ),
                     "name": name,
                     "source_name": name,
-                    "group": "technical",
-                    "value": float(row[name]),
+                    "value": float(value),
                     "unit": unit,
-                    "voltage_kv": [voltage],
-                    "quality": quality,
-                    "is_derived": quality in {"interpolated", "proxy"},
-                    "derivation": row.get("notes"),
-                    "notes": row.get("notes"),
-                    "reference_url": row["source"],
-                    "source_provider": "OPAL-RT and documented project derivations",
-                })
+                    "mapping_rule_id": rule_id,
+                }
+                voltage_column = spec.get("voltage_column")
+                if voltage_column and pd.notna(row.get(str(voltage_column))):
+                    data["voltage_kv"] = [float(row[str(voltage_column)])]
+                self._canonical_metadata(data, row, spec)
+                rows.append(data)
         return rows
+
+    def _mapping_rule_sets(
+        self,
+        spec: Mapping[str, object],
+    ) -> list[pd.DataFrame]:
+        source = str(spec.get("mapping_source", spec["source_id"]))
+        files = [self.options.get("class_mapping_file"), spec.get("mapping_file")]
+        return [
+            self._read_mapping_rules(
+                self.manager.project_root / str(path), source
+            )
+            for path in files
+            if path
+        ]
+
+    def _read_mapping_rules(self, path: Path, source: str) -> pd.DataFrame:
+        rules = pd.read_csv(path, keep_default_na=False)
+        missing = self._MAPPING_COLUMNS.difference(rules.columns)
+        if missing:
+            raise ValueError(f"Parameter mapping is missing: {sorted(missing)}")
+        selected = rules.loc[rules["source"].eq(source)].copy()
+        if selected.empty:
+            return selected
+        selected["priority"] = pd.to_numeric(selected["priority"], errors="raise")
+        if selected["rule_id"].eq("").any() or selected["rule_id"].duplicated().any():
+            raise ValueError(f"Invalid parameter mapping rule IDs in {path}.")
+        return selected.sort_values(["priority", "rule_id"])
+
+    def _classify(
+        self,
+        row: pd.Series,
+        spec: Mapping[str, object],
+        rule_sets: list[pd.DataFrame],
+    ) -> tuple[object, object, object, object]:
+        dataset = self._source_value(row, spec, "applies_to_dataset")
+        asset_class = self._source_value(row, spec, "class")
+        subclass = self._source_value(row, spec, "subclass")
+        rule_id = row.get("mapping_rule_id", pd.NA)
+        if pd.notna(dataset) and pd.notna(asset_class):
+            return dataset, asset_class, subclass, rule_id
+
+        values = {
+            "source_type_pattern": self._raw_mapping_value(
+                row, spec, "source_type"
+            ),
+            "technology_pattern": self._raw_mapping_value(
+                row, spec, "technology"
+            ),
+            "fuel_pattern": self._raw_mapping_value(row, spec, "fuel"),
+        }
+        for rules in rule_sets:
+            for _, rule in rules.iterrows():
+                if all(
+                    re.search(rule[column] or ".*", values[column], re.I)
+                    for column in values
+                ):
+                    return (
+                        rule["dataset"], rule["class"],
+                        rule["subclass"] or pd.NA, rule["rule_id"],
+                    )
+        return dataset, asset_class, subclass, rule_id
+
+    @staticmethod
+    def _source_value(
+        row: pd.Series,
+        spec: Mapping[str, object],
+        name: str,
+    ) -> object:
+        if name in spec:
+            return spec[name]
+        column = str(spec.get(f"{name}_column", name))
+        return row.get(column, pd.NA)
+
+    @staticmethod
+    def _raw_mapping_value(
+        row: pd.Series,
+        spec: Mapping[str, object],
+        name: str,
+    ) -> str:
+        column = str(spec.get(f"{name}_column", name))
+        value = row.get(column, "")
+        return "" if pd.isna(value) else str(value)
+
+    @staticmethod
+    def _source_uid(
+        row: pd.Series,
+        spec: Mapping[str, object],
+        suffix: str | None = None,
+    ) -> str:
+        column = spec.get("source_uid_column", "source_uid")
+        if column in row.index and pd.notna(row.get(str(column))):
+            parts = [str(row[str(column)])]
+        else:
+            columns = list(spec.get("source_uid_columns", ()))
+            if not columns:
+                raise ValueError(
+                    f"{spec['source_id']} requires source_uid_column or "
+                    "source_uid_columns."
+                )
+            parts = [str(row[column]) for column in columns]
+        if spec.get("source_uid_suffix") is not None:
+            parts.append(str(spec["source_uid_suffix"]))
+        if suffix is not None:
+            parts.append(suffix)
+        return ":".join(parts)
+
+    def _canonical_metadata(
+        self,
+        data: dict[str, object],
+        row: pd.Series,
+        spec: Mapping[str, object],
+    ) -> None:
+        for name in (
+            "quality", "notes", "reference_url", "source_provider",
+            "location", "scope", "standard_type", "scenario", "priority",
+        ):
+            value = self._source_value(row, spec, name)
+            if pd.notna(value):
+                data[name] = value
+        if pd.isna(data.get("source_provider")):
+            source_id = str(spec["source_id"])
+            data["source_provider"] = self.manager.raw_data.catalog.loc[
+                source_id, "provider"
+            ]
 
     def _required_fields(
         self,
@@ -630,27 +652,6 @@ class _ParameterStandardizer(_Standardizer):
                 source_id, "version"
             ],
         }
-
-
-def _provider(reference_url: object) -> object:
-    if pd.isna(reference_url) or not str(reference_url).strip():
-        return pd.NA
-    url = str(reference_url).lower()
-    if "dispa" in url:
-        return "Dispa-SET"
-    if "pypsa" in url:
-        return "PyPSA technology-data"
-    if "nrel" in url:
-        return "NREL"
-    return "Cited source"
-
-
-def _first_value(*values: object) -> object:
-    for value in values:
-        if not pd.isna(value) and str(value).strip():
-            return value
-    return pd.NA
-
 
 def _canonical_name(
     value: object,

@@ -104,7 +104,8 @@ schema基于真实输出生成，并校验必要字段、字段顺序、dtype、
    候选端点并保留`merged_source_uids`；校验UID、端点、电压、节点度和设施来源。
 10. 按每个地理node实际接入的`(voltage_kv, current_type)`组合生成单电压、单AC/DC
     `bus`，并把branch端点严格改写为匹配bus。多电压station的相邻电压bus按电压排序
-    组成可审计推断链：AC-AC生成`transformer`，含DC的一对生成`converter`。
+    组成可审计推断链：AC-AC生成`transformer`，AC-DC生成无方向含义的
+    `ac_dc_converter`；没有明确设备证据时不推断DC-DC转换设备。
 
 实现按职责分为：
 
@@ -127,6 +128,14 @@ parameter采用长表，稳定参数名为`name`，`group`仅用于technical、e
 environmental和others分组。`resolve()`按对象UID、dataset、class/subclass、状态、容量、
 电压、时间、地区、场景、priority和数据质量匹配；最高优先级候选数值冲突时返回
 `ambiguous`，不会静默选择。
+
+每个原始参数源在`standard_data.toml`中声明`source_id`及表形adapter：`long_table`
+处理一行一个参数的长表，`wide_table`把参数列展开成长表。分类优先采用源表已有字段，
+否则使用公共`class_mapping.csv`；公共规则仍不足时，可为该source配置独立
+`mapping_file`。adapter不内置特定数据源分类，也不存在处理顺序依赖。
+
+`model_assumptions.csv`合并Dispa-SET、NREL及generic UC/SOC/VOLL补充假设；PyPSA
+technology-data已经提供的参数不在该文件重复保存。所有source输出合并后按UID稳定排序。
 
 ```python
 parameter = standard_data.load("parameter")
