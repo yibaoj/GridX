@@ -1,0 +1,14 @@
+[general]
+strict_case = false
+commitment_mode = "continuous"
+
+[reliability]
+enabled = true
+cost_eur_per_mwh = 10000.0
+capacity_multiplier = 1.2
+
+[solver]
+name = "highs"
+time_limit_s = 300.0
+mip_gap = 0.01
+log_to_console = false

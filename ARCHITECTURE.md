@@ -49,7 +49,7 @@ Responsibilities:
 - Produce canonical entity tables and multidimensional time-series arrays.
 - Validate uniqueness, units, geometry, ranges, and referential integrity.
 
-Each dataset has a focused processor module (`network.py`, `generation.py`,
+Each dataset has a focused processor module (`network.py`, `generator.py`,
 `storage.py`, `parameter.py`, `load.py`, `population.py`, and `resource.py`).
 `manager.py` is the public orchestration interface, while `schema.py` owns the
 shared contract.
@@ -71,8 +71,9 @@ and first match wins. Every standardized asset keeps its matched
 Stable dataset IDs:
 
 - `spatial`: administrative province, city, or other boundary geometries.
-- `network`: a bundle containing node and branch GeoDataFrames.
-- `generation` and `storage`: physical asset GeoDataFrames.
+- `network`: a bundle containing bus, branch, transformer, and converter
+  GeoDataFrames.
+- `generator` and `storage`: physical asset GeoDataFrames.
 - `parameter`: long-form technical and economic assumptions.
 - `population`: a gridded population GeoDataFrame.
 - `load` and `resource`: labeled xarray datasets with `time`, `uid`, and
@@ -87,43 +88,49 @@ strings preserve source precision, such as `2024`, `2024-03`, or an exact
 timestamp. `load` and `resource` store one WKT geometry coordinate per `uid`,
 so geometry is not duplicated along the time dimension.
 
-## 3. Spatiotemporal mapping layer: `spatiotemporal_mapping.py`
+## 3. Spatiotemporal mapping layer: `src/mapping/`
 
 Responsibilities:
 
 - Map points, polygons, and raster cells to stable `spatial_unit_id` values.
-- Build explicit generator-to-node, storage-to-node, and load-cell-to-node
+- Build explicit generator-to-bus, storage-to-bus, and load-cell-to-bus
   mapping tables.
 - Harmonize time zones, interval conventions, calendars, and model snapshots.
 - Aggregate or disaggregate data without changing canonical source tables.
 - Record mapping method, distance, confidence, and review flags.
 
 Spatial units are an indexing and aggregation interface, not an electrical
-connectivity rule. Sharing one grid cell does not prove that two assets are
-electrically connected. Network connectivity remains defined by branch
-endpoints; grid membership only narrows candidate searches.
+connectivity rule. Sharing one cell does not prove electrical connectivity;
+branch, transformer, and converter endpoints define it.
 
-## 4. System case layer: `system_case.py`
+## 4. System case layer: `src/case/`
 
 Responsibilities:
 
 - Select year, scenario, geographic scope, network resolution, technology
   aggregation, and time horizon.
-- Assemble one validated `PowerSystemCase` from canonical tables and mappings.
+- Assemble one validated `PowerSystemCase` from mapped data and standard
+  parameters.
 - Keep static assets separate from time-varying demand and availability.
 - Check node references, power and energy units, temporal coverage, network
   connectivity, and energy conservation.
 
-Expected `PowerSystemCase` contents:
+`PowerSystemCase` contains:
 
-- Nodes, branches, generators, storage units, and loads.
+- Bus, branch, transformer, converter, generator, storage, and load data.
+- Resolved long-form parameters and aggregation membership tables.
 - Generator availability, nodal demand, inflows, and outage profiles.
 - Scenario settings, units, spatial resolution, time resolution, and source
   provenance.
 
+Backend adapters are isolated under `src/case/backends/`. PyPSA is the first
+adapter; its declarative parameter manifest is shared by case validation and
+backend conversion. Future adapters must consume the same case rather than
+source data and provide an equivalent unit-checked manifest.
+
 This object is the only data interface consumed by optimization applications.
 
-## 5. Application layer: `applications.py`
+## 5. Application layer: `src/app/`
 
 Responsibilities:
 
@@ -136,6 +143,12 @@ Responsibilities:
 
 Applications must not read OSM, GEM, population, weather, or load source files
 directly. A new application should reuse the same validated system case.
+
+The first implementation is `src/app/uc/`. It converts a
+`PowerSystemCase` through the PyPSA backend, solves continuous clustered
+UC/ED, and returns a result object with solver status and a configurable
+time/spatial-scope production plot. Binary unit commitment remains a future
+formulation because the current case aggregates units by bus and technology.
 
 ## Independent resolutions
 

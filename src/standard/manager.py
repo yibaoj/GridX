@@ -14,7 +14,7 @@ import pandas as pd
 import xarray as xr
 
 from ..raw import RawDataManager
-from .generation import _GenerationStandardizer
+from .generator import _GeneratorStandardizer
 from .load import _LoadStandardizer
 from .network import _NetworkStandardizer
 from .parameter import (
@@ -45,7 +45,7 @@ class StandardDataManager:
     _PROCESSORS = {
         "spatial": _SpatialStandardizer,
         "network": _NetworkStandardizer,
-        "generation": _GenerationStandardizer,
+        "generator": _GeneratorStandardizer,
         "storage": _StorageStandardizer,
         "parameter": _ParameterStandardizer,
         "load": _LoadStandardizer,
@@ -132,7 +132,7 @@ class StandardDataManager:
                 _read_geodataframe(paths[2]),
                 _read_geodataframe(paths[3]),
             )
-        elif dataset_id in {"spatial", "generation", "storage", "population"}:
+        elif dataset_id in {"spatial", "generator", "storage", "population"}:
             data = _read_geodataframe(paths[0])
         elif dataset_id == "parameter":
             data = as_parameter_data(_read_dataframe(paths[0]))
@@ -169,7 +169,7 @@ class StandardDataManager:
             data = filter_spatial_levels(data, spatial_levels)
         if dataset_id in {
             "network",
-            "generation",
+            "generator",
             "storage",
             "load",
             "population",

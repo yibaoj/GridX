@@ -49,7 +49,7 @@ _REQUIRED = {
         "bus_same_admin", "bus_spatial_uid", "bus_admin_uid",
     },
     ("resource", "data"): {"spatial_uid", "spatial_level"},
-    ("generation", "data"): {
+    ("generator", "data"): {
         "spatial_uid", "spatial_level", "admin_uid", "cell_distance_km", "bus_uid",
         "bus_mapping_method", "bus_distance_km", "bus_same_admin",
         "bus_spatial_uid", "bus_admin_uid",

@@ -121,7 +121,7 @@ function drawLayer(layerId, geojson) {
     });
   }
   if (layerId === "population") return drawPopulation(geojson);
-  if (layerId === "generation" || layerId === "storage") return drawAssets(geojson);
+  if (layerId === "generator" || layerId === "storage") return drawAssets(geojson);
   if (layerId === "network") return drawNetwork(geojson);
 }
 

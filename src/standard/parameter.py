@@ -12,10 +12,16 @@ import numpy as np
 import pandas as pd
 
 from .base import _Standardizer
-from .schema import _finalize_frame, _write_dataframe, time_bounds
+from .schema import REQUIRED_COLUMNS, _finalize_frame, _write_dataframe, time_bounds
 
 
 PARAMETER_GROUPS = ("technical", "economic", "environmental", "others")
+PARAMETER_OPTIONAL_COLUMNS = (
+    "capacity_min_mw", "capacity_max_mw", "currency_year", "derivation",
+    "is_derived", "location", "mapping_rule_id", "notes", "quality",
+    "reference_url", "scenario", "selector_json", "source_name",
+    "source_provider", "voltage_kv",
+)
 DEFAULT_QUALITY_ORDER = (
     "official_observation",
     "source",
@@ -30,17 +36,23 @@ DEFAULT_QUALITY_ORDER = (
 
 MATCHING_RULES = pd.DataFrame([
     {
+        "rank": -1,
+        "criterion": "ineligible",
+        "direction": "excluded",
+        "description": "No named candidate passes all applicability constraints.",
+    },
+    {
         "rank": 0,
-        "criterion": "eligibility",
-        "direction": "required",
+        "criterion": "eligible",
+        "direction": "accepted",
         "description": (
-            "Keep only records matching name, dataset, asset selectors, "
-            "capacity, voltage, time, location, scenario, and selector_json."
+            "A single named candidate passes dataset, asset selectors, capacity, "
+            "voltage, time, location, scenario, and selector_json constraints."
         ),
     },
     {
         "rank": 1,
-        "criterion": "exact asset UID",
+        "criterion": "exact uid",
         "direction": "preferred",
         "description": "Prefer applies_to_uid equal to the target asset uid.",
     },
@@ -54,7 +66,7 @@ MATCHING_RULES = pd.DataFrame([
         "rank": 3,
         "criterion": "priority",
         "direction": "lower first",
-        "description": "Apply explicit row priority plus optional source priority.",
+        "description": "Apply the optional per-call source priority.",
     },
     {
         "rank": 4,
@@ -64,17 +76,23 @@ MATCHING_RULES = pd.DataFrame([
     },
     {
         "rank": 5,
-        "criterion": "observed_at",
+        "criterion": "observed time",
         "direction": "latest first",
         "description": "Prefer the most recently observed eligible record.",
     },
     {
         "rank": 6,
-        "criterion": "equal-rank values",
-        "direction": "must agree",
+        "criterion": "equal values",
+        "direction": "equivalent",
         "description": (
-            "Return equivalent_duplicates when values agree, otherwise ambiguous."
+            "Equal-rank candidates have equivalent values and units."
         ),
+    },
+    {
+        "rank": 7,
+        "criterion": "ambiguous",
+        "direction": "unresolved",
+        "description": "Equal-rank candidates conflict in value or unit.",
     },
 ])
 
@@ -98,15 +116,16 @@ class ParameterData(pd.DataFrame):
         ] = " > ".join(quality_order)
         return rules
 
-    def report(self, by: str | Iterable[str] = "group") -> pd.DataFrame:
-        """Summarize records and canonical names by selected categories."""
+    def count(self, by: str | Iterable[str] = "group") -> pd.DataFrame:
+        """Count records and canonical names by selected categories."""
 
         keys = [by] if isinstance(by, str) else list(by)
         unknown = set(keys).difference(self.columns)
         if unknown:
-            raise KeyError(f"Unknown parameter report fields: {sorted(unknown)}")
+            raise KeyError(f"Unknown parameter count fields: {sorted(unknown)}")
+        frame = self if "is_derived" in self else self.assign(is_derived=False)
         result = (
-            self.groupby(keys, dropna=False)
+            frame.groupby(keys, dropna=False)
             .agg(
                 records=("uid", "size"),
                 names=("name", "nunique"),
@@ -144,59 +163,35 @@ class ParameterData(pd.DataFrame):
             float(self.attrs.get("conflict_tolerance", 1e-6))
             if conflict_tolerance is None else conflict_tolerance
         )
-        return validate_parameter_data(self, conflict_tolerance=tolerance)
-
-    def explain(
-        self,
-        asset: Mapping[str, object] | pd.Series,
-        name: str,
-        *,
-        dataset_id: str,
-        at: object = None,
-        scenario: str | None = None,
-        locations: Iterable[str] = (),
-        source_priority: Mapping[str, int] | None = None,
-        quality_order: Iterable[str] | None = None,
-    ) -> pd.DataFrame:
-        """Show every candidate and its acceptance or rejection reason."""
-
-        return ParameterResolver(
+        return validate_parameter_data(
             self,
-            source_priority=source_priority,
-            name_aliases=self.attrs.get("name_aliases", {}),
-            quality_order=(
-                quality_order
-                if quality_order is not None
-                else self.attrs.get("quality_order", DEFAULT_QUALITY_ORDER)
-            ),
-            conflict_tolerance=float(
-                self.attrs.get("conflict_tolerance", 1e-6)
-            ),
-        ).explain(
-            asset,
-            name,
-            dataset_id=dataset_id,
-            at=at,
-            scenario=scenario,
-            locations=locations,
+            conflict_tolerance=tolerance,
+            quality_order=self.attrs.get("quality_order", DEFAULT_QUALITY_ORDER),
         )
 
     def resolve(
         self,
-        asset: Mapping[str, object] | pd.Series,
+        assets: Mapping[str, object] | pd.Series | pd.DataFrame,
         names: str | Iterable[str],
         *,
         dataset_id: str,
         at: object = None,
         scenario: str | None = None,
         locations: Iterable[str] = (),
+        selector_context: Mapping[str, object] | None = None,
         source_priority: Mapping[str, int] | None = None,
         quality_order: Iterable[str] | None = None,
         include_candidates: bool = False,
     ) -> pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]:
-        """Resolve names and optionally return every evaluated candidate."""
+        """Resolve names for one or many assets, optionally with candidate details."""
 
-        return ParameterResolver(
+        declared_dataset = _declared_dataset_id(assets)
+        if declared_dataset is not None and declared_dataset != dataset_id:
+            raise ValueError(
+                f"asset dataset {declared_dataset!r} conflicts with "
+                f"dataset_id={dataset_id!r}."
+            )
+        resolver = _ParameterResolver(
             self,
             source_priority=source_priority,
             name_aliases=self.attrs.get("name_aliases", {}),
@@ -208,48 +203,94 @@ class ParameterData(pd.DataFrame):
             conflict_tolerance=float(
                 self.attrs.get("conflict_tolerance", 1e-6)
             ),
-        ).resolve(
-            asset,
-            names,
-            dataset_id=dataset_id,
-            at=at,
-            scenario=scenario,
-            locations=locations,
-            include_candidates=include_candidates,
         )
+        locations = tuple(locations)
+        if not isinstance(assets, pd.DataFrame):
+            return resolver.resolve(
+                _with_selector_context(assets, selector_context),
+                names,
+                dataset_id=dataset_id,
+                at=at,
+                scenario=scenario,
+                locations=locations,
+                include_candidates=include_candidates,
+            )
 
-    def check_requirements(
-        self,
-        assets: pd.DataFrame,
-        names: Iterable[str],
-        *,
-        dataset_id: str,
-        at: object = None,
-        scenario: str | None = None,
-        source_priority: Mapping[str, int] | None = None,
-        quality_order: Iterable[str] | None = None,
-    ) -> pd.DataFrame:
-        """Resolve required names for every row in an asset table."""
-
-        return ParameterResolver(
-            self,
-            source_priority=source_priority,
-            name_aliases=self.attrs.get("name_aliases", {}),
-            quality_order=(
-                quality_order
-                if quality_order is not None
-                else self.attrs.get("quality_order", DEFAULT_QUALITY_ORDER)
-            ),
-            conflict_tolerance=float(
-                self.attrs.get("conflict_tolerance", 1e-6)
-            ),
-        ).check_requirements(
-            assets,
-            names,
-            dataset_id=dataset_id,
-            at=at,
-            scenario=scenario,
+        resolved_tables = []
+        candidate_tables = []
+        for _, asset in assets.iterrows():
+            asset_locations = _asset_locations(asset, locations)
+            result = resolver.resolve(
+                _with_selector_context(asset, selector_context),
+                names,
+                dataset_id=dataset_id,
+                at=at,
+                scenario=scenario,
+                locations=asset_locations,
+                include_candidates=include_candidates,
+            )
+            if include_candidates:
+                resolved, candidates = result
+                resolved_tables.append(resolved)
+                if not candidates.empty:
+                    candidate_tables.append(candidates)
+            else:
+                resolved_tables.append(result)
+        resolved = (
+            pd.concat(resolved_tables, ignore_index=True)
+            if resolved_tables else pd.DataFrame()
         )
+        if not include_candidates:
+            return resolved
+        candidates = (
+            pd.concat(candidate_tables, ignore_index=True)
+            if candidate_tables else pd.DataFrame()
+        )
+        return resolved, candidates
+
+
+def _with_selector_context(
+    asset: Mapping[str, object] | pd.Series,
+    context: Mapping[str, object] | None,
+) -> dict[str, object]:
+    """Add explicit selector fields without overriding asset information."""
+
+    target = dict(asset)
+    for key, value in (context or {}).items():
+        existing = target.get(key)
+        if not _missing(existing) and existing != value:
+            raise ValueError(
+                f"selector_context[{key!r}]={value!r} conflicts with "
+                f"asset value {existing!r}."
+            )
+        target[key] = value
+    return target
+
+
+def _asset_locations(
+    asset: Mapping[str, object] | pd.Series,
+    fallback: Iterable[str],
+) -> tuple[str, ...]:
+    values = asset.get("location_hierarchy", fallback)
+    if _missing(values):
+        return ()
+    if isinstance(values, str):
+        return (values,)
+    return tuple(str(value) for value in values)
+
+
+def _declared_dataset_id(assets: object) -> str | None:
+    attrs = getattr(assets, "attrs", {})
+    for name in ("standard_dataset_id", "mapping_dataset_id"):
+        value = attrs.get(name)
+        if not _missing(value):
+            return str(value)
+    if isinstance(assets, Mapping):
+        for name in ("standard_dataset_id", "mapping_dataset_id", "dataset_id"):
+            value = assets.get(name)
+            if not _missing(value):
+                return str(value)
+    return None
 
 
 def as_parameter_data(data: pd.DataFrame) -> ParameterData:
@@ -279,13 +320,14 @@ class _ParameterStandardizer(_Standardizer):
         ]
 
         frame = self._normalize_rows(pd.DataFrame(rows))
-        frame = frame.reindex(sorted(frame.columns), axis=1)
+        frame = frame.reindex(columns=(
+            *REQUIRED_COLUMNS["parameter"], *PARAMETER_OPTIONAL_COLUMNS,
+        ))
         frame = frame.sort_values("uid", kind="stable").reset_index(drop=True)
         string_columns = (
             "source_name", "quality", "notes", "reference_url",
-            "source_provider", "location", "scope", "standard_type",
-            "pypsa_technology", "fuel_technology", "fuel", "currency_year",
-            "selector_json", "scenario", "derivation",
+            "source_provider", "location", "currency_year", "selector_json",
+            "scenario", "derivation",
         )
         result = _finalize_frame(
             frame,
@@ -294,9 +336,6 @@ class _ParameterStandardizer(_Standardizer):
                 column for column in string_columns if column in frame
             ),
         )
-        result["priority"] = pd.to_numeric(
-            result["priority"], errors="coerce"
-        ).astype("Int64")
         result = as_parameter_data(result)
         result.attrs["quality_order"] = tuple(
             self.options.get("quality_order", DEFAULT_QUALITY_ORDER)
@@ -311,6 +350,9 @@ class _ParameterStandardizer(_Standardizer):
             result,
             conflict_tolerance=float(
                 self.options.get("conflict_tolerance", 1e-6)
+            ),
+            quality_order=self.options.get(
+                "quality_order", DEFAULT_QUALITY_ORDER
             ),
         )
         report.write(self.output("report"))
@@ -344,24 +386,26 @@ class _ParameterStandardizer(_Standardizer):
                 raise ValueError(
                     f"Unknown parameter adapter {adapter!r} for {source_id!r}."
                 )
+            if "quality" in spec and "quality_column" in spec:
+                raise ValueError(
+                    f"{source_id} must configure either a fixed quality or "
+                    "quality_column, not both."
+                )
             source_ids.append(source_id)
         if len(source_ids) != len(set(source_ids)):
             raise ValueError("Each parameter source_id must be configured once.")
         return list(specs)
 
     def _normalize_rows(self, frame: pd.DataFrame) -> pd.DataFrame:
-        default_priority = int(self.options.get("default_priority", 100))
         for column, default in {
             "source_name": pd.NA,
             "selector_json": "{}",
             "scenario": pd.NA,
-            "priority": default_priority,
             "is_derived": False,
             "derivation": pd.NA,
         }.items():
             if column not in frame:
                 frame[column] = default
-        frame["priority"] = frame["priority"].fillna(default_priority)
         frame["source_name"] = frame["source_name"].fillna(
             frame["name"]
         )
@@ -392,6 +436,10 @@ class _ParameterStandardizer(_Standardizer):
         elif "fuel_technology" in frame:
             frame["fuel"] = frame["fuel"].fillna(frame["fuel_technology"])
         frame["selector_json"] = frame.apply(_selector_json, axis=1)
+        if "quality" in frame:
+            frame["quality"] = frame["quality"].replace(
+                self.options.get("quality_aliases", {})
+            )
         quality = frame.get("quality", pd.Series(pd.NA, index=frame.index))
         derived = quality.astype("string").isin(
             {"derived", "interpolated", "proxy", "model_default"}
@@ -611,7 +659,7 @@ class _ParameterStandardizer(_Standardizer):
     ) -> None:
         for name in (
             "quality", "notes", "reference_url", "source_provider",
-            "location", "scope", "standard_type", "scenario", "priority",
+            "location", "scope", "standard_type", "scenario",
         ):
             value = self._source_value(row, spec, name)
             if pd.notna(value):
@@ -710,6 +758,20 @@ def _selector_json(row: pd.Series) -> str:
             ) from error
     if not isinstance(selectors, dict):
         raise ValueError(f"selector_json for {row.get('uid')} must be an object.")
+    for column in ("fuel", "standard_type"):
+        value = row.get(column)
+        if pd.isna(value) or (column == "fuel" and value == row.get("class")):
+            continue
+        selectors[column] = value
+    technology = row.get("technology")
+    if (
+        pd.notna(technology)
+        and (
+            pd.isna(row.get("applies_to_dataset"))
+            or pd.isna(row.get("class"))
+        )
+    ):
+        selectors["technology"] = technology
     for column, value in row.items():
         if not column.startswith("selector_") or column == "selector_json":
             continue
@@ -757,6 +819,7 @@ def validate_parameter_data(
     data: pd.DataFrame,
     *,
     conflict_tolerance: float = 1e-6,
+    quality_order: Iterable[str] = DEFAULT_QUALITY_ORDER,
 ) -> ParameterValidationReport:
     """Check record validity, source coverage, and exact-scope conflicts."""
 
@@ -805,6 +868,15 @@ def validate_parameter_data(
         issue(
             "error", "invalid_parameter_group",
             f"Unknown parameter group {row.group!r}.", row.uid,
+        )
+
+    known_qualities = set(quality_order)
+    for quality in sorted(
+        set(data["quality"].dropna().astype(str)).difference(known_qualities)
+    ):
+        issue(
+            "warning", "unknown_quality",
+            f"Quality {quality!r} is not present in quality_order.", quality,
         )
 
     expected_groups = data["name"].map(_parameter_group)
@@ -933,10 +1005,8 @@ def _parameter_conflicts(
 ) -> pd.DataFrame:
     scope_columns = [
         "name", "applies_to_dataset", "applies_to_uid", "class",
-        "subclass", "status", "standard_type", "capacity_min_mw",
-        "capacity_max_mw", "location", "scope", "scenario", "valid_from",
-        "valid_to", "selector_json", "pypsa_technology", "fuel_technology",
-        "fuel",
+        "subclass", "status", "capacity_min_mw", "capacity_max_mw",
+        "location", "scenario", "valid_from", "valid_to", "selector_json",
         "voltage_scope_kv",
     ]
     frame = data.copy()
@@ -977,7 +1047,7 @@ def _parameter_conflicts(
     )
 
 
-class ParameterResolver:
+class _ParameterResolver:
     """Resolve parameter candidates with deterministic, inspectable rules."""
 
     def __init__(
@@ -997,7 +1067,7 @@ class ParameterResolver:
         }
         self.conflict_tolerance = conflict_tolerance
 
-    def explain(
+    def _candidate_details(
         self,
         target: Mapping[str, object] | pd.Series,
         name: str,
@@ -1007,7 +1077,7 @@ class ParameterResolver:
         scenario: str | None = None,
         locations: Iterable[str] = (),
     ) -> pd.DataFrame:
-        """Show every candidate and why it is accepted or rejected."""
+        """Evaluate every candidate and record its acceptance or rejection reason."""
 
         target = dict(target)
         name = _canonical_name(name, self.name_aliases)
@@ -1055,43 +1125,9 @@ class ParameterResolver:
         candidate_tables = []
         target_uid = dict(target).get("uid", pd.NA)
 
-        def record_candidates(
-            candidates: pd.DataFrame,
-            requested_name: str,
-            *,
-            selected_uid: object = pd.NA,
-            top_uids: set[str] | None = None,
-            ambiguous: bool = False,
-            equivalent: bool = False,
-        ) -> None:
-            if not include_candidates or candidates.empty:
-                return
-            details = candidates.copy()
-            details.insert(0, "target_uid", target_uid)
-            details.insert(1, "requested_name", requested_name)
-            details["selection_status"] = "rejected"
-            details["selection_reason"] = details["rejection_reason"]
-            eligible = details["eligible"]
-            details.loc[eligible, "selection_status"] = "not_selected"
-            details.loc[eligible, "selection_reason"] = "lower_rank"
-            top = details["uid"].isin(top_uids or set())
-            if ambiguous:
-                details.loc[top, "selection_status"] = "ambiguous"
-                details.loc[top, "selection_reason"] = "equal_rank_value_conflict"
-            elif pd.notna(selected_uid):
-                selected = details["uid"].eq(selected_uid)
-                details.loc[selected, "selection_status"] = "selected"
-                details.loc[selected, "selection_reason"] = "highest_rank"
-                if equivalent:
-                    details.loc[top & ~selected, "selection_status"] = "equivalent"
-                    details.loc[
-                        top & ~selected, "selection_reason"
-                    ] = "equal_rank_equivalent_value"
-            candidate_tables.append(details)
-
         for name in names:
             requested_name = str(name)
-            candidates = self.explain(
+            candidates = self._candidate_details(
                 target,
                 name,
                 dataset_id=dataset_id,
@@ -1103,69 +1139,71 @@ class ParameterResolver:
             base = {
                 "target_uid": target_uid,
                 "name": _canonical_name(name, self.name_aliases),
-                "candidate_count": len(eligible),
+                "candidate_count": len(candidates),
+                "eligible_count": len(eligible),
                 "selected_parameter_uid": pd.NA,
                 "value": pd.NA,
                 "unit": pd.NA,
-                "resolution_status": "missing",
-                "match_level": pd.NA,
-                "matched_conditions": pd.NA,
-                "specificity": pd.NA,
-                "priority": pd.NA,
+                "match_rank": -1,
+                "match_result": "ineligible",
+                "match_info": _eligibility_info(candidates),
+                "group": pd.NA,
+                "source_id": pd.NA,
+                "source_uid": pd.NA,
+                "source_version": pd.NA,
+                "reference_url": pd.NA,
                 "quality": pd.NA,
                 "observed_at": pd.NA,
-                "rank_trace": "no eligible candidate",
             }
             if eligible.empty:
                 rows.append(base)
-                record_candidates(candidates, requested_name)
+                if include_candidates and not candidates.empty:
+                    candidate_tables.append(_candidate_output(
+                        candidates, target_uid, requested_name, -1
+                    ))
                 continue
-            rank = [
-                "exact_uid", "specificity", "effective_priority",
-                "quality_rank", "observed_rank",
-            ]
-            first = eligible.iloc[0]
-            top = eligible.loc[
-                eligible[rank].eq(first[rank]).all(axis=1)
-            ].sort_values("uid")
+            top, match_rank, match_result, match_info = _select_by_rank(
+                eligible, target_uid
+            )
             same = _equivalent_values(top, self.conflict_tolerance)
-            base.update(_rank_details(first))
+            base.update({
+                "match_rank": match_rank,
+                "match_result": match_result,
+                "match_info": match_info,
+            })
             if len(top) > 1 and not same:
                 base.update({
-                    "resolution_status": "ambiguous",
-                    "rank_trace": (
-                        f"{base['rank_trace']}; equal-rank values conflict"
-                    ),
+                    "match_rank": 7,
+                    "match_result": "ambiguous",
+                    "match_info": _candidate_uid_info(top),
                 })
                 rows.append(base)
-                record_candidates(
-                    candidates,
-                    requested_name,
-                    top_uids=set(top["uid"]),
-                    ambiguous=True,
-                )
+                if include_candidates:
+                    candidate_tables.append(_candidate_output(
+                        candidates, target_uid, requested_name, 7,
+                        top=top, ambiguous=True,
+                    ))
                 continue
             selected = top.iloc[0]
-            fallback = selected.get("quality") in {
-                "generic", "interpolated", "proxy", "low", "model_default"
-            }
             base.update({
                 "selected_parameter_uid": selected["uid"],
                 "value": selected["value"],
                 "unit": selected["unit"],
-                "resolution_status": (
-                    "equivalent_duplicates" if len(top) > 1
-                    else "fallback" if fallback else "resolved"
-                ),
+                **{
+                    column: selected.get(column)
+                    for column in (
+                        "group", "source_id", "source_uid", "source_version",
+                        "reference_url", "quality", "observed_at",
+                    )
+                },
             })
             rows.append(base)
-            record_candidates(
-                candidates,
-                requested_name,
-                selected_uid=selected["uid"],
-                top_uids=set(top["uid"]),
-                equivalent=len(top) > 1,
-            )
+            if include_candidates:
+                candidate_tables.append(_candidate_output(
+                    candidates, target_uid, requested_name, match_rank,
+                    top=top, selected_uid=selected["uid"],
+                    equivalent=len(top) > 1,
+                ))
         resolved = pd.DataFrame(rows)
         if not include_candidates:
             return resolved
@@ -1174,34 +1212,6 @@ class ParameterResolver:
             if candidate_tables else pd.DataFrame()
         )
         return resolved, candidate_details
-
-    def check_requirements(
-        self,
-        targets: pd.DataFrame,
-        names: Iterable[str],
-        *,
-        dataset_id: str,
-        at: object = None,
-        scenario: str | None = None,
-    ) -> pd.DataFrame:
-        """Resolve required parameters for every target and expose readiness gaps."""
-
-        results = []
-        for _, target in targets.iterrows():
-            locations = target.get("location_hierarchy", ())
-            if _missing(locations):
-                locations = ()
-            elif isinstance(locations, str):
-                locations = [locations]
-            results.append(self.resolve(
-                target,
-                names,
-                dataset_id=dataset_id,
-                at=at,
-                scenario=scenario,
-                locations=locations,
-            ))
-        return pd.concat(results, ignore_index=True) if results else pd.DataFrame()
 
     def _evaluate(
         self,
@@ -1240,7 +1250,7 @@ class ParameterResolver:
                 specificity += 1
                 matched.append("dataset_id")
         require("applies_to_uid", "uid")
-        for column in ("class", "subclass", "status", "fuel", "standard_type"):
+        for column in ("class", "subclass", "status"):
             require(column)
 
         capacity = target.get("capacity_mw", target.get("power_capacity_mw"))
@@ -1310,10 +1320,7 @@ class ParameterResolver:
                 specificity += 1
                 matched.append(f"selector:{key}")
 
-        row_priority = row.get("priority")
-        priority = int(100 if pd.isna(row_priority) else row_priority) + self.source_priority.get(
-            str(row.get("source_id")), 0
-        )
+        priority = self.source_priority.get(str(row.get("source_id")), 0)
         quality_rank = self.quality_rank.get(
             str(row.get("quality")), len(self.quality_rank)
         )
@@ -1329,30 +1336,194 @@ class ParameterResolver:
         )
 
 
-def _rank_details(candidate: pd.Series) -> dict[str, object]:
-    specificity = int(candidate["specificity"])
-    match_level = (
-        "asset_uid" if bool(candidate["exact_uid"])
-        else "scoped" if specificity > 1
-        else "dataset_default" if specificity == 1
-        else "global_default"
+def _select_by_rank(
+    eligible: pd.DataFrame,
+    target_uid: object,
+) -> tuple[pd.DataFrame, int, str, str]:
+    """Narrow eligible candidates and identify the decisive matching rule."""
+
+    remaining = eligible.copy()
+    if len(remaining) == 1:
+        candidate = remaining.iloc[0]
+        if bool(candidate["exact_uid"]):
+            return remaining, 1, "exact uid", f"asset_uid={target_uid}"
+        return remaining, 0, "eligible", _candidate_uid_info(remaining)
+
+    criteria = (
+        (1, "exact uid", "exact_uid", "max"),
+        (2, "specificity", "specificity", "max"),
+        (3, "priority", "effective_priority", "min"),
+        (4, "quality", "quality_rank", "min"),
+        (5, "observed time", "observed_rank", "max"),
     )
-    observed = candidate.get("observed_at")
-    observed_text = "missing" if pd.isna(observed) else str(observed)
-    return {
-        "match_level": match_level,
-        "matched_conditions": candidate["matched_conditions"],
-        "specificity": specificity,
-        "priority": int(candidate["effective_priority"]),
-        "quality": candidate.get("quality"),
-        "observed_at": observed,
-        "rank_trace": (
-            f"exact_uid={bool(candidate['exact_uid'])}; "
-            f"specificity={specificity}; "
-            f"priority={int(candidate['effective_priority'])}; "
-            f"quality={candidate.get('quality')}; observed_at={observed_text}"
+    for rank, criterion, column, direction in criteria:
+        best = (
+            remaining[column].max()
+            if direction == "max" else remaining[column].min()
+        )
+        narrowed = remaining.loc[remaining[column].eq(best)]
+        if len(narrowed) == len(remaining):
+            continue
+        remaining = narrowed
+        if len(remaining) == 1:
+            candidate = remaining.iloc[0]
+            return remaining, rank, criterion, _criterion_info(
+                criterion, candidate, target_uid
+            )
+    return remaining, 6, "equal values", _candidate_uid_info(remaining)
+
+
+def _criterion_info(
+    criterion: str,
+    candidate: pd.Series,
+    target_uid: object,
+) -> str:
+    if criterion == "exact uid":
+        return f"asset_uid={target_uid}"
+    if criterion == "specificity":
+        return (
+            f"specificity={int(candidate['specificity'])}; "
+            f"matched={candidate['matched_conditions']}"
+        )
+    if criterion == "priority":
+        return (
+            f"source_id={candidate['source_id']}; "
+            f"source_priority={int(candidate['effective_priority'])}"
+        )
+    if criterion == "quality":
+        return (
+            f"quality={candidate.get('quality')}; "
+            f"quality_rank={int(candidate['quality_rank'])}"
+        )
+    return f"observed_at={candidate.get('observed_at')}"
+
+
+def _candidate_output(
+    candidates: pd.DataFrame,
+    target_uid: object,
+    requested_name: str,
+    outcome_rank: int,
+    *,
+    top: pd.DataFrame | None = None,
+    selected_uid: object = pd.NA,
+    equivalent: bool = False,
+    ambiguous: bool = False,
+) -> pd.DataFrame:
+    """Format candidate-level decisions against every matching rank."""
+
+    details = candidates.copy()
+    top = details.iloc[0:0] if top is None else top
+    top_uids = set(top["uid"].astype(str))
+    winner = top.iloc[0] if not top.empty else None
+    details["selection_status"] = np.where(
+        details["eligible"], "not_selected", "ineligible"
+    )
+    details["match_rank"] = -1
+    if winner is not None:
+        eligible = details["eligible"]
+        details.loc[eligible, "match_rank"] = details.loc[eligible].apply(
+            lambda row: _elimination_rank(row, winner, outcome_rank), axis=1
+        )
+    selected = details["uid"].eq(selected_uid) if pd.notna(selected_uid) else False
+    top_mask = details["uid"].astype(str).isin(top_uids)
+    if ambiguous:
+        details.loc[top_mask, "selection_status"] = "ambiguous"
+    elif pd.notna(selected_uid):
+        details.loc[selected, "selection_status"] = "selected"
+        if equivalent:
+            details.loc[top_mask & ~selected, "selection_status"] = "equivalent"
+
+    details["rank_m1_ineligible"] = details["rejection_reason"].mask(
+        details["eligible"]
+    )
+    details["rank_0_eligible"] = details["eligible"]
+    details["rank_1_exact_uid"] = details["exact_uid"].where(
+        details["match_rank"].ge(1)
+    )
+    details["rank_2_specificity"] = details.apply(
+        lambda row: (
+            f"{int(row['specificity'])}: {row['matched_conditions']}"
+            if row["match_rank"] >= 2 else pd.NA
         ),
+        axis=1,
+    )
+    details["rank_3_priority"] = details["effective_priority"].where(
+        details["match_rank"].ge(3)
+    )
+    details["rank_4_quality"] = details.apply(
+        lambda row: (
+            f"{row.get('quality')} ({int(row['quality_rank'])})"
+            if row["match_rank"] >= 4 else pd.NA
+        ),
+        axis=1,
+    )
+    details["rank_5_observed_time"] = details["observed_at"].where(
+        details["match_rank"].ge(5)
+    )
+    details["rank_6_equal_values"] = pd.Series(
+        pd.NA, index=details.index, dtype="boolean"
+    )
+    details.loc[details["match_rank"].ge(6), "rank_6_equal_values"] = (
+        top_mask & equivalent
+    )
+    details["rank_7_ambiguous"] = pd.Series(
+        pd.NA, index=details.index, dtype="boolean"
+    )
+    details.loc[details["match_rank"].ge(7), "rank_7_ambiguous"] = (
+        top_mask & ambiguous
+    )
+    details["target_uid"] = target_uid
+    details["requested_name"] = requested_name
+    rank_columns = [
+        "selection_status", "match_rank", "rank_m1_ineligible",
+        "rank_0_eligible", "rank_1_exact_uid", "rank_2_specificity",
+        "rank_3_priority", "rank_4_quality", "rank_5_observed_time",
+        "rank_6_equal_values", "rank_7_ambiguous", "target_uid",
+        "requested_name",
+    ]
+    internal = {
+        "eligible", "rejection_reason", "exact_uid", "specificity",
+        "effective_priority", "quality_rank", "observed_rank",
+        "matched_conditions",
     }
+    remaining = [
+        column for column in details.columns
+        if column not in {*rank_columns, *internal}
+    ]
+    return details.loc[:, [*rank_columns, *remaining]]
+
+
+def _elimination_rank(
+    candidate: pd.Series,
+    winner: pd.Series,
+    outcome_rank: int,
+) -> int:
+    for rank, column in (
+        (1, "exact_uid"), (2, "specificity"), (3, "effective_priority"),
+        (4, "quality_rank"), (5, "observed_rank"),
+    ):
+        if candidate[column] != winner[column]:
+            return rank
+    return outcome_rank
+
+
+def _eligibility_info(candidates: pd.DataFrame) -> str:
+    if candidates.empty:
+        return "no parameter has the requested name"
+    reasons = candidates["rejection_reason"].dropna().astype(str)
+    counts: dict[str, int] = {}
+    for reason in reasons:
+        for item in filter(None, reason.split("; ")):
+            counts[item] = counts.get(item, 0) + 1
+    return "; ".join(
+        f"{reason} ({count})" for reason, count in sorted(counts.items())
+    ) or "no eligible candidate"
+
+
+def _candidate_uid_info(candidates: pd.DataFrame) -> str:
+    return "parameter_uids=" + ";".join(
+        sorted(candidates["uid"].dropna().astype(str).unique())
+    )
 
 
 def _selector_matches(actual: object, condition: object) -> bool:

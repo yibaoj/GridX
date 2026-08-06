@@ -15,7 +15,7 @@ MAPPING_IDS = (
     "load",
     "resource",
     "network",
-    "generation",
+    "generator",
     "storage",
 )
 
@@ -46,7 +46,7 @@ class MappingData:
     load: xr.Dataset
     resource: xr.Dataset
     network: MappedNetwork
-    generation: gpd.GeoDataFrame
+    generator: gpd.GeoDataFrame
     storage: gpd.GeoDataFrame
 
     @property

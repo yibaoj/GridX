@@ -25,11 +25,14 @@ conda activate env-py313
 | `src/raw/` | 下载、定位和校验原始source |
 | `src/standard/` | 将异构source转换为稳定dataset |
 | `src/mapping/` | 统一空间单元、时间轴及电气母线映射 |
+| `src/case/` | 构建后端无关算例并适配PyPSA等求解框架 |
+| `src/app/` | 基于PowerSystemCase运行UC/ED等应用并整理结果 |
 | `src/web/` | 只读展示standard/mapping结果 |
 | `config/raw_data_sources.csv` | 原始数据URL、规范本地路径和下载选项 |
 | `config/standard_data.toml` | dataset依赖及标准化参数 |
-| `config/class_mapping.csv` | generation/storage的有序分类规则 |
+| `config/class_mapping.csv` | generator/storage的有序分类规则 |
 | `config/mapping.toml` | 空间单元、重映射和节点匹配参数 |
+| `config/case.toml` | 算例筛选、聚合、时间和后端参数 |
 | `test_layers.ipynb` | 各层公共API和绘图示例 |
 
 `osm_exp.ipynb`、`gem_exp.ipynb`、`load_exp.ipynb`、`cf_exp.ipynb`和
@@ -62,7 +65,7 @@ ERA5下载需要接受CDS许可并配置`~/.cdsapirc`。年份、范围和特征
 
 ## 标准数据层
 
-固定dataset ID为`spatial`、`network`、`generation`、`storage`、`parameter`、
+固定dataset ID为`spatial`、`network`、`generator`、`storage`、`parameter`、
 `load`、`population`和`resource`。实体数据使用GeoParquet，连续时空数据使用
 xarray/NetCDF，network使用包含`bus`、`branch`、`transformer`和`converter`的
 `NetworkData`。
@@ -73,11 +76,11 @@ from src.standard import StandardDataManager
 standard_data = StandardDataManager("config/standard_data.toml")
 standard_data.check()
 network = standard_data.build("network")
-generation = standard_data.load("generation")
+generator = standard_data.load("generator")
 
 network.schema
-generation.schema
-standard_data.schema(["network", "generation"])
+generator.schema
+standard_data.schema(["network", "generator"])
 ```
 
 schema基于真实输出生成，并校验必要字段、字段顺序、dtype、CRS和
@@ -126,8 +129,10 @@ converter连接。
 
 parameter采用长表，稳定参数名为`name`，`group`仅用于technical、economic、
 environmental和others分组。`resolve()`按对象UID、dataset、class/subclass、状态、容量、
-电压、时间、地区、场景、priority和数据质量匹配；最高优先级候选数值冲突时返回
-`ambiguous`，不会静默选择。
+电压、时间、地区、场景、可选source priority和数据质量匹配；`match_rank`、
+`match_result`和`match_info`分别记录最终规则序号、criterion及对应值或失败原因。
+全局规则由`parameter.matching_rules`给出，rank从`-1 ineligible`到`7 ambiguous`；
+并列候选冲突时不会静默选择。
 
 每个原始参数源在`standard_data.toml`中声明`source_id`及表形adapter：`long_table`
 处理一行一个参数的长表，`wide_table`把参数列展开成长表。分类优先采用源表已有字段，
@@ -139,17 +144,34 @@ technology-data已经提供的参数不在该文件重复保存。所有source�
 
 ```python
 parameter = standard_data.load("parameter")
-parameter.report()
+parameter.count()
 parameter.validate()
 parameter.matching_rules
 
 resolved, candidates = parameter.resolve(
-    generation.iloc[0],
+    generator.iloc[0],
     ["minimum_output_pu", "ramp_up_pu_per_hour"],
-    dataset_id="generation",
+    dataset_id="generator",
     include_candidates=True,
 )
+
+# The same API accepts a DataFrame for batch resolution.
+resolved = parameter.resolve(
+    generator,
+    ["minimum_output_pu", "ramp_up_pu_per_hour"],
+    dataset_id="generator",
+)
+
+# Supply fields referenced by parameter.selector_json without changing the asset.
+resolved = parameter.resolve(
+    {"uid": "osm:branch:1", "class": "branch"},
+    "r_ohm_per_km",
+    dataset_id="network",
+    selector_context={"current_type": "AC"},
+)
 ```
+
+`selector_context`只补充缺失的匹配字段；与资产已有字段冲突时直接报错。
 
 ### Resource
 
@@ -175,8 +197,8 @@ from src.mapping import SpatiotemporalMappingManager
 mapping = SpatiotemporalMappingManager("config/mapping.toml", standard_data)
 mapped_data = mapping.build()
 mapping.check()
-generation = mapping.load("generation")
-mapping.schema(["network", "generation"])
+generator = mapping.load("generator")
+mapping.schema(["network", "generator"])
 ```
 
 `build()`完成以下工作：
@@ -186,8 +208,8 @@ mapping.schema(["network", "generation"])
 3. population按面积汇总；load按面积或辅助数据守恒分配；resource按相交面积进行
    intensive加权；所有时序转换到配置时区和时间步。
 4. 根据branch、transformer和converter的`from_bus_uid/to_bus_uid`提取最大连通子图。
-5. 把bus、branch、generation和storage映射到cell。
-6. generation、storage和load按各自配置匹配电气bus。默认候选为
+5. 把bus、branch、generator和storage映射到cell。
+6. generator、storage和load按各自配置匹配电气bus。默认候选为
    `bus_subclasses=["station_bus"]`；同位置多bus按各自配置的
    `voltage_preference="high"`或`"low"`选择。
 
@@ -199,11 +221,81 @@ load是extensive量，拆分后保持总量；resource是intensive量，使用�
 全部结果写入`outputs/mapping/`，不会覆盖standard数据。
 
 ```python
-figure = mapping.plot("generation")
+figure = mapping.plot("generator")
 figures = mapping.plot("load", year=2024)
 ```
 
 standard和mapping使用相同plot API、投影、配色和图例规则。
+
+## 算例层
+
+`PowerSystemCase`只依赖mapped data和standard parameter，不读取原始source。它按配置
+筛选电压、状态和容量，重建最大连通子图，复用mapping接口重新挂接generator、storage
+和load，解析参数，并按bus或cell聚合资产。
+
+```python
+from src.case import PowerSystemCaseManager
+
+case_manager = PowerSystemCaseManager(
+    "config/case.toml",
+    mapped_data=mapped_data,
+    standard_data=standard_data,
+)
+case = case_manager.build()
+case.validation
+case.parameter_manifest()
+pypsa_network = case.to_pypsa(strict=False)
+```
+
+`case.network`包含bus、branch、transformer和converter；每个静态组件均提供`.data`、
+`.parameter`和`.membership`。参数表保留`uid/name/group/value/unit`、命中规则和source
+溯源。`config/pypsa_parameter_manifest.toml`是validation和PyPSA adapter共享的唯一参数
+契约，记录目标属性、case参数名、规范/允许单位、转换公式、fallback、required和适用
+selector。`strict=True`拒绝required参数使用fallback；`strict=False`允许显式fallback并
+在PyPSA `meta`中记录缺口。fallback不再分散在adapter代码或`case.toml`中。
+
+PyPSA generator边际成本按`vom + fuel / efficiency + carbon_price *
+co2_intensity / efficiency`组装，carrier细化到`class:subclass`。规划扩容开关和碳价在
+`case.toml`配置；参数覆盖检查通过后，扩容与经济调度结果才具有完整经济含义。
+
+当前按`bus/cell + class + subclass`聚合适用于连续ED、规划和聚类UC。聚合会丢失单机
+二进制启停轨迹，启动/停机参数虽然保留，但在连续PyPSA generator中不会生效。
+
+case绘图与standard/mapping保持相同API，只返回Figure：
+
+```python
+figure = case.plot(
+    "network",
+    spatial=standard_data.load("spatial"),
+    map_crs=mapping.options["metric_crs"],
+)
+```
+
+## 应用层
+
+当前`src/app/uc/`使用PyPSA求解聚合机组的连续UC/ED。它不重新读取原始数据，也不修改
+`PowerSystemCase`。时间范围由case配置及`run(start=..., end=...)`共同限定；运行图可再按
+`admin_uids`或`spatial_uids`限定空间范围。
+
+```python
+from src.app import UnitCommitmentApplication
+
+application = UnitCommitmentApplication(case, "config/uc.toml")
+formulation = application.list()
+result = application.run()
+realized_formulation = application.list(active_only=True)
+figure = result.plot(
+    start="2024-07-15 00:00",
+    end="2024-07-15 23:00",
+)
+```
+
+`application.list()`按sets、parameters、variables、objective、系统约束和设备约束顺序
+返回LaTeX符号，并标记active状态；求解后再次调用还会对照Linopy中实际存在的变量和
+约束。当前`continuous`模式不激活status/startup/shutdown二进制变量及最小开停机约束。
+`strict_case=true`会拒绝required参数使用manifest fallback；`strict_case=false`仅适合
+流程验证。达到求解时限但已有可行解时，结果保留
+`termination_condition="time_limit"`且`is_optimal=false`。
 
 ## Notebook与应用
 
@@ -228,6 +320,8 @@ conda run -n env-py313 python -m src.web.app
 - GEM到station的匹配是地理候选，不代表已核实并网站和接入电压。
 - ERA5径流代理不能直接替代电站级水文模型。
 - 通用技术经济参数、线路参数和燃料价格必须在具体case中进行地区与年份校核。
+- 当前transformer/converter和部分generator/storage参数覆盖不足，正式仿真应采用
+  `strict=True`并先解决`case.validation`中的失败项。
 - 正式地图应遵守自然资源部地图管理要求。
 
 ## 参考

@@ -1,0 +1,72 @@
+[general]
+metric_crs = "+proj=aea +lat_1=25 +lat_2=47 +lat_0=0 +lon_0=105 +datum=WGS84 +units=m +no_defs"
+random_seed = 42
+
+[network]
+minimum_voltage_kv = 500.0
+maximum_voltage_kv = 2000.0
+missing_status_is_active = true
+bus_statuses = ["operating", "operational", "active", "in_service", "in_use"]
+branch_statuses = ["operating", "operational", "active", "in_service", "in_use"]
+transformer_statuses = ["operating", "operational", "active", "in_service", "in_use"]
+converter_statuses = ["operating", "operational", "active", "in_service", "in_use"]
+bus_subclasses = ["station_bus"]
+
+[assets.generator]
+statuses = ["operating", "operational", "active", "in_service", "in_use"]
+minimum_capacity_mw = 10.0
+maximum_capacity_mw = 1000000.0
+
+[assets.storage]
+statuses = ["operating", "operational", "active", "in_service", "in_use"]
+minimum_capacity_mw = 10.0
+maximum_capacity_mw = 1000000.0
+
+[asset_bus_mapping.generator]
+method = "geometry"
+prefer_same_admin = true
+voltage_preference = "high"
+
+[asset_bus_mapping.storage]
+method = "geometry"
+prefer_same_admin = true
+voltage_preference = "high"
+
+[load_bus_mapping]
+method = "geometry"
+prefer_same_admin = true
+voltage_preference = "high"
+
+[aggregation]
+generator = "bus"
+storage = "bus"
+load = "bus"
+sum_parameter_names = []
+boolean_parameter_names = ["committable", "cyclic_state_of_charge"]
+
+[time]
+start = "2024-07-15 00:00"
+end = "2024-07-15 23:00"
+time_step = "1h"
+timezone = "Asia/Shanghai"
+
+[parameters]
+at = "2025"
+
+[backend.pypsa]
+parameter_manifest = "config/pypsa_parameter_manifest.toml"
+strict = false
+carbon_price_eur_per_t_co2 = 0.0
+branch_extendable = false
+transformer_extendable = false
+converter_extendable = false
+generator_extendable = false
+storage_extendable = false
+
+[backend.pypsa.resource_class_mapping]
+onshore = "onshore"
+offshore_fixed = "offshore_fixed"
+offshore_floating = "offshore_fixed"
+offshore_unspecified = "offshore_fixed"
+utility_scale_pv = "utility_scale_pv"
+run_of_river = "run_of_river"

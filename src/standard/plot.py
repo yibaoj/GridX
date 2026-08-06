@@ -674,7 +674,7 @@ def asset_point_map(
     return figure
 
 
-def plot_generation(
+def plot_generator(
     data: gpd.GeoDataFrame,
     *,
     spatial: gpd.GeoDataFrame | None = None,
@@ -683,7 +683,7 @@ def plot_generation(
     **_: object,
 ) -> Figure:
     return asset_point_map(
-        data, "capacity_mw", "Generation assets by class", spatial, map_crs,
+        data, "capacity_mw", "Generator assets by class", spatial, map_crs,
         china_inset,
     )
 
@@ -790,7 +790,7 @@ def plot_parameter(data: pd.DataFrame, **_: object) -> Figure:
 PLOTTERS: dict[str, Callable[..., PlotResult]] = {
     "spatial": plot_spatial,
     "network": plot_network,
-    "generation": plot_generation,
+    "generator": plot_generator,
     "storage": plot_storage,
     "parameter": plot_parameter,
     "load": plot_load,

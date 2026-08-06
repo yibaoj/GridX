@@ -1,0 +1,290 @@
+version = 1
+backend = "pypsa"
+pypsa_version = "1.2"
+
+[[parameter]]
+key = "branch_ac_r"
+component = "branch"
+target = "Line.r"
+name = "r_ohm_per_km"
+unit = "ohm/km"
+unit_factors = { "ohm/km" = 1.0 }
+formula = "r = value * length_km"
+fallback = 0.03
+required = true
+selector = { current_type = "AC" }
+
+[[parameter]]
+key = "branch_ac_x"
+component = "branch"
+target = "Line.x"
+name = "x_ohm_per_km"
+unit = "ohm/km"
+unit_factors = { "ohm/km" = 1.0 }
+formula = "x = value * length_km"
+fallback = 0.30
+required = true
+selector = { current_type = "AC" }
+
+[[parameter]]
+key = "branch_ac_b"
+component = "branch"
+target = "Line.b"
+name = "c_nf_per_km"
+unit = "nF/km"
+unit_factors = { "nF/km" = 1.0 }
+formula = "b = 2 * pi * 50 * value * 1e-9 * length_km"
+fallback = 0.0
+required = false
+selector = { current_type = "AC" }
+
+[[parameter]]
+key = "branch_ac_s_nom"
+component = "branch"
+target = "Line.s_nom"
+name = "s_nom_mva_per_circuit"
+unit = "MVA/circuit"
+unit_factors = { "MVA/circuit" = 1.0 }
+formula = "s_nom = value * circuits"
+fallback = 2000.0
+required = true
+selector = { current_type = "AC" }
+
+[[parameter]]
+key = "branch_dc_p_nom"
+component = "branch"
+target = "Link.p_nom"
+name = "s_nom_mva_per_circuit"
+unit = "MVA/circuit"
+unit_factors = { "MVA/circuit" = 1.0 }
+formula = "p_nom = value * circuits"
+fallback = 2000.0
+required = true
+selector = { current_type = "DC" }
+
+[[parameter]]
+key = "branch_dc_efficiency"
+component = "branch"
+target = "Link.efficiency"
+name = "efficiency"
+unit = "p.u."
+unit_factors = { "p.u." = 1.0, "per unit" = 1.0 }
+formula = "efficiency = value"
+fallback = 1.0
+required = false
+selector = { current_type = "DC" }
+
+[[parameter]]
+key = "transformer_s_nom"
+component = "transformer"
+target = "Transformer.s_nom"
+name = "sn_mva"
+unit = "MVA"
+unit_factors = { "MVA" = 1.0 }
+formula = "s_nom = value"
+fallback = 3000.0
+required = true
+
+[[parameter]]
+key = "transformer_vk"
+component = "transformer"
+target = "Transformer.x"
+name = "vk_percent"
+unit = "%"
+unit_factors = { "%" = 1.0 }
+formula = "x = sqrt((value / 100)^2 - r^2)"
+fallback = 12.0
+required = true
+
+[[parameter]]
+key = "transformer_vkr"
+component = "transformer"
+target = "Transformer.r"
+name = "vkr_percent"
+unit = "%"
+unit_factors = { "%" = 1.0 }
+formula = "r = value / 100"
+fallback = 0.3
+required = true
+
+[[parameter]]
+key = "converter_p_nom"
+component = "converter"
+target = "Link.p_nom"
+name = "p_nom_mw"
+unit = "MW"
+unit_factors = { "MW" = 1.0 }
+formula = "p_nom = value"
+fallback = 3000.0
+required = true
+
+[[parameter]]
+key = "converter_efficiency"
+component = "converter"
+target = "Link.efficiency"
+name = "efficiency"
+unit = "p.u."
+unit_factors = { "p.u." = 1.0, "per unit" = 1.0 }
+formula = "efficiency = value"
+fallback = 0.98
+required = true
+
+[[parameter]]
+key = "generator_efficiency"
+component = "generator"
+target = "Generator.efficiency"
+name = "efficiency"
+unit = "p.u."
+unit_factors = { "p.u." = 1.0, "per unit" = 1.0, "per unit (in LHV)" = 1.0 }
+formula = "efficiency = value"
+fallback = 1.0
+required = true
+selector = { class = ["bioenergy", "coal", "gas", "geothermal", "nuclear", "other"] }
+
+[[parameter]]
+key = "generator_vom"
+component = "generator"
+target = "Generator.marginal_cost"
+name = "vom"
+unit = "EUR/MWh"
+unit_factors = { "EUR/MWh" = 1.0, "EUR/MWh output" = 1.0, "EUR/MWh_e" = 1.0, "EUR/MWhel" = 1.0 }
+formula = "marginal_cost = vom + (fuel + carbon_price * co2_intensity) / efficiency"
+fallback = 0.0
+required = true
+
+[[parameter]]
+key = "generator_fuel"
+component = "generator"
+target = "Generator.marginal_cost"
+name = "fuel"
+unit = "EUR/MWh_th"
+unit_factors = { "EUR/MWh_th" = 1.0, "EUR/MWhth" = 1.0, "EUR/MWh" = 1.0 }
+formula = "marginal_cost = vom + (fuel + carbon_price * co2_intensity) / efficiency"
+fallback = 0.0
+required = true
+selector = { class = ["bioenergy", "coal", "gas", "geothermal", "nuclear", "other"] }
+
+[[parameter]]
+key = "generator_co2_intensity"
+component = "generator"
+target = "Carrier.co2_emissions"
+name = "co2_intensity"
+unit = "tCO2/MWh_th"
+unit_factors = { "tCO2/MWh_th" = 1.0 }
+formula = "co2_emissions = value / efficiency"
+fallback = 0.0
+required = false
+selector = { class = ["bioenergy", "coal", "gas", "geothermal", "nuclear", "other"] }
+
+[[parameter]]
+key = "generator_minimum_output"
+component = "generator"
+target = "Generator.p_min_pu"
+name = "minimum_output_pu"
+unit = "p.u."
+unit_factors = { "p.u." = 1.0, "per unit" = 1.0 }
+formula = "p_min_pu = value; variable renewables are forced to zero"
+fallback = 0.0
+required = false
+
+[[parameter]]
+key = "generator_ramp_up"
+component = "generator"
+target = "Generator.ramp_limit_up"
+name = "ramp_up_pu_per_hour"
+unit = "p.u./h"
+unit_factors = { "p.u./h" = 1.0 }
+formula = "ramp_limit_up = value * time_step_hours"
+fallback = 1.0
+required = true
+selector = { class = ["bioenergy", "coal", "gas", "geothermal", "nuclear", "other"] }
+
+[[parameter]]
+key = "generator_ramp_down"
+component = "generator"
+target = "Generator.ramp_limit_down"
+name = "ramp_down_pu_per_hour"
+unit = "p.u./h"
+unit_factors = { "p.u./h" = 1.0 }
+formula = "ramp_limit_down = value * time_step_hours"
+fallback = 1.0
+required = true
+selector = { class = ["bioenergy", "coal", "gas", "geothermal", "nuclear", "other"] }
+
+[[parameter]]
+key = "generator_capital_cost"
+component = "generator"
+target = "Generator.capital_cost"
+name = "capital_cost"
+unit = "EUR/MW/year"
+unit_factors = { "EUR/MW/year" = 1.0 }
+formula = "capital_cost = value"
+fallback = 0.0
+required = false
+
+[[parameter]]
+key = "storage_efficiency"
+component = "storage"
+target = "StorageUnit.efficiency_store,StorageUnit.efficiency_dispatch"
+name = "efficiency"
+unit = "p.u."
+unit_factors = { "p.u." = 1.0, "per unit" = 1.0 }
+formula = "efficiency_store = efficiency_dispatch = sqrt(value)"
+fallback = 1.0
+required = true
+
+[[parameter]]
+key = "storage_max_hours"
+component = "storage"
+target = "StorageUnit.max_hours"
+name = "energy_to_power_ratio"
+field = "duration_h"
+unit = "h"
+unit_factors = { "h" = 1.0 }
+formula = "max_hours = duration_h if available, otherwise value"
+fallback = 6.0
+required = true
+
+[[parameter]]
+key = "storage_standing_loss"
+component = "storage"
+target = "StorageUnit.standing_loss"
+name = "standing_loss_pu_per_hour"
+unit = "p.u./h"
+unit_factors = { "p.u./h" = 1.0 }
+formula = "standing_loss = value; PyPSA applies (1 - value)^elapsed_hours"
+fallback = 0.0
+required = true
+
+[[parameter]]
+key = "storage_cyclic_soc"
+component = "storage"
+target = "StorageUnit.cyclic_state_of_charge"
+name = "cyclic_state_of_charge"
+unit = "boolean"
+unit_factors = { "boolean" = 1.0 }
+formula = "cyclic_state_of_charge = bool(value)"
+fallback = false
+required = false
+
+[[parameter]]
+key = "storage_marginal_cost"
+component = "storage"
+target = "StorageUnit.marginal_cost"
+name = "vom"
+unit = "EUR/MWh"
+unit_factors = { "EUR/MWh" = 1.0, "EUR/MWh output" = 1.0 }
+formula = "marginal_cost = value"
+fallback = 0.0
+required = false
+
+[[parameter]]
+key = "storage_capital_cost"
+component = "storage"
+target = "StorageUnit.capital_cost"
+name = "capital_cost"
+unit = "EUR/MW/year"
+unit_factors = { "EUR/MW/year" = 1.0 }
+formula = "capital_cost = value"
+fallback = 0.0
+required = false

@@ -6,9 +6,8 @@ time_step = "1h"
 random_seed = 42
 
 [cell]
-kind = "spatial"
-# Used by every cell kind. With kind="spatial", each selected standard
-# spatial boundary becomes one cell after overlap resolution.
+kind = "square"
+# Build 50 km metric squares, then clip them by the selected spatial levels.
 levels = ["province", "marine_zone"]
 size_km = 50.0
 polygon_file = ""
@@ -38,7 +37,7 @@ source_cell_height_degrees = 0.25
 bus_subclasses = ["station_bus"]
 
 [asset_bus_mapping]
-generation_method = "geometry"
+generator_method = "geometry"
 storage_method = "geometry"
 prefer_same_admin = true
 voltage_preference = "high"
@@ -54,5 +53,5 @@ population = "population.parquet"
 load = "load.nc"
 resource = "resource.nc"
 network = "network"
-generation = "generation.parquet"
+generator = "generator.parquet"
 storage = "storage.parquet"

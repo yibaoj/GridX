@@ -34,7 +34,7 @@ icon = "users"
 unit = "people"
 
 [[layers]]
-id = "generation"
+id = "generator"
 label = "发电"
 description = "按空间单元聚合的装机"
 icon = "factory"

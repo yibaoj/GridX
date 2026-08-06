@@ -222,7 +222,7 @@ def asset_pie_map(
     return figure
 
 
-def plot_generation(
+def plot_generator(
     data: gpd.GeoDataFrame,
     *,
     cells: gpd.GeoDataFrame,
@@ -232,7 +232,7 @@ def plot_generation(
     **_: object,
 ) -> Figure:
     return asset_pie_map(
-        data, cells, "capacity_mw", "Mapped generation", spatial, map_crs,
+        data, cells, "capacity_mw", "Mapped generator", spatial, map_crs,
         china_inset,
     )
 
@@ -259,6 +259,7 @@ def plot_network(
     spatial: gpd.GeoDataFrame | None = None,
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
+    title: str | None = None,
     **_: object,
 ) -> Figure:
     """Plot the retained connected network and its associated cells."""
@@ -346,8 +347,10 @@ def plot_network(
         finish_map(
             axis,
             (
-                f"Mapped largest connected network: {len(data.bus):,} buses, "
-                f"{len(data.branch):,} branches"
+                title or (
+                    f"Mapped largest connected network: {len(data.bus):,} buses, "
+                    f"{len(data.branch):,} branches"
+                )
                 if index == 0 else ""
             ),
         )
@@ -360,6 +363,6 @@ PLOTTERS: dict[str, Callable[..., PlotResult]] = {
     "load": plot_load,
     "resource": plot_resource,
     "network": plot_network,
-    "generation": plot_generation,
+    "generator": plot_generator,
     "storage": plot_storage,
 }

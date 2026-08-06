@@ -38,7 +38,7 @@ class SpatiotemporalMappingManager:
         "load": ("load",),
         "resource": ("resource",),
         "network": ("network",),
-        "generation": ("generation",),
+        "generator": ("generator",),
         "storage": ("storage",),
     }
 
@@ -108,6 +108,9 @@ class SpatiotemporalMappingManager:
                 and auxiliary_dataset == "population"
             ),
         )
+        population.loc[
+            population["spatial_level"].eq("marine_zone"), "population"
+        ] = 0.0
         annotate_schema(population, "population")
         self._write_geodataframe("population", population)
 
@@ -194,8 +197,8 @@ class SpatiotemporalMappingManager:
         annotate_schema(network.branch, "network", "branch")
         annotate_schema(network.transformer, "network", "transformer")
         annotate_schema(network.converter, "network", "converter")
-        generation = map_objects_to_cells(
-            self.standard_data.load("generation"),
+        generator = map_objects_to_cells(
+            self.standard_data.load("generator"),
             cells,
             metric_crs=self.options["metric_crs"],
         )
@@ -223,10 +226,10 @@ class SpatiotemporalMappingManager:
             "bus_subclasses": bus_subclasses,
             "voltage_preference": str(asset_options["voltage_preference"]),
         }
-        generation_bus = map_to_buses(
-            generation,
-            output_uid_column="generation_uid",
-            method=str(asset_options["generation_method"]),
+        generator_bus = map_to_buses(
+            generator,
+            output_uid_column="generator_uid",
+            method=str(asset_options["generator_method"]),
             **common,
         )
         storage_bus = map_to_buses(
@@ -260,13 +263,13 @@ class SpatiotemporalMappingManager:
             ),
             "load",
         )
-        generation = annotate_schema(
+        generator = annotate_schema(
             attach_bus_mapping(
-                generation,
-                generation_bus,
-                source_uid_column="generation_uid",
+                generator,
+                generator_bus,
+                source_uid_column="generator_uid",
             ),
-            "generation",
+            "generator",
         )
         storage = annotate_schema(
             attach_bus_mapping(
@@ -277,7 +280,7 @@ class SpatiotemporalMappingManager:
             "storage",
         )
         self._write_xarray("load", load, "demand_mw")
-        self._write_geodataframe("generation", generation)
+        self._write_geodataframe("generator", generator)
         self._write_geodataframe("storage", storage)
         self._write_network(network, branch_cells)
         return MappingData(
@@ -292,7 +295,7 @@ class SpatiotemporalMappingManager:
                 network.converter,
                 branch_cells,
             ),
-            generation=generation,
+            generator=generator,
             storage=storage,
         )
 
@@ -353,7 +356,7 @@ class SpatiotemporalMappingManager:
             data = _filter_plot_levels(data, selected_levels)
         kwargs["spatial"] = spatial
         kwargs.setdefault("map_crs", self.options["metric_crs"])
-        if mapping_id in {"network", "generation", "storage"}:
+        if mapping_id in {"network", "generator", "storage"}:
             cells = kwargs.pop("cells", self.load("spatial"))
             kwargs["cells"] = cells.loc[
                 cells["spatial_level"].astype(str).isin(selected_levels)

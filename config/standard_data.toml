@@ -31,16 +31,15 @@ dc_cables_per_circuit = 2.0
 metric_crs = "+proj=aea +lat_1=25 +lat_2=47 +lat_0=0 +lon_0=105 +datum=WGS84 +units=m +no_defs"
 include_statuses = []
 
-[datasets.generation]
-processor = "generation"
+[datasets.generator]
+processor = "generator"
 source_ids = ["gem_integrated_power"]
-output = "generation.parquet"
+output = "generator.parquet"
 
-[datasets.generation.options]
+[datasets.generator.options]
 sheet = "Power facilities"
 country_areas = ["China", "China mainland"]
 include_statuses = []
-observed_at = "2026-03"
 class_mapping_file = "config/class_mapping.csv"
 
 [datasets.storage]
@@ -49,13 +48,9 @@ source_ids = ["gem_integrated_power", "doe_storage"]
 output = "storage.parquet"
 
 [datasets.storage.options]
-gem_sheet = "Power facilities"
+sheet = "Power facilities"
 country_areas = ["China", "China mainland"]
-gem_statuses = []
-doe_country = "China"
-doe_statuses = []
-gem_observed_at = "2026-03"
-doe_observed_at = "2022"
+include_statuses = []
 class_mapping_file = "config/class_mapping.csv"
 
 [datasets.parameter]
@@ -64,9 +59,10 @@ outputs = { data = "parameter.parquet", report = "parameter_validation_report.js
 
 [datasets.parameter.options]
 class_mapping_file = "config/class_mapping.csv"
-default_priority = 100
 conflict_tolerance = 1e-6
 name_aliases = {}
+# Normalize source-specific quality labels after each adapter reads them.
+quality_aliases = { nrel_2023 = "source", nrel_2024 = "source", resource_limited = "model_default" }
 quality_order = [
   "official_observation",
   "source",
@@ -88,6 +84,7 @@ name_column = "parameter"
 technology_column = "technology"
 notes_column = "further description"
 reference_url_column = "source"
+# Fixed quality for every record from this source.
 quality = "source"
 observed_at = "2025"
 valid_from = "2025"
@@ -112,6 +109,7 @@ applies_to_dataset = "network"
 class = "branch"
 subclass = "ac_overhead_line"
 voltage_column = "voltage_kv"
+# Per-record quality read from the named source column.
 quality_column = "assumption_quality"
 notes_column = "notes"
 reference_url_column = "source"

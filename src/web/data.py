@@ -63,7 +63,7 @@ class WebDataService:
             return self._spatial()
         if layer_id == "population":
             return self._population()
-        if layer_id in {"generation", "storage"}:
+        if layer_id in {"generator", "storage"}:
             return self._assets(layer_id)
         if layer_id == "network":
             return self._network()
@@ -96,7 +96,7 @@ class WebDataService:
     def _assets(self, layer_id: str) -> dict[str, Any]:
         data = self.mapping.load(layer_id)
         value_column = (
-            "capacity_mw" if layer_id == "generation" else "power_capacity_mw"
+            "capacity_mw" if layer_id == "generator" else "power_capacity_mw"
         )
         values = pd.to_numeric(data[value_column], errors="coerce").fillna(0)
         grouped = (

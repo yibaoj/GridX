@@ -8,6 +8,37 @@ import re
 import pandas as pd
 
 
+def _normalize_scope_label(value: object) -> str:
+    return re.sub(
+        r"_+", "_", re.sub(r"[^a-z0-9]+", "_", str(value).lower())
+    ).strip("_")
+
+
+def _asset_in_scope(
+    country: object,
+    status: object,
+    *,
+    country_areas: list[str],
+    include_statuses: list[str],
+) -> bool:
+    """Apply source-independent country and canonical-status filters."""
+
+    country_name = _normalize_scope_label(country)
+    country_name = "china" if country_name == "china_mainland" else country_name
+    allowed_countries = {
+        "china"
+        if _normalize_scope_label(value) == "china_mainland"
+        else _normalize_scope_label(value)
+        for value in country_areas
+    }
+    allowed_statuses = {
+        _normalize_scope_label(value) for value in include_statuses
+    }
+    return country_name in allowed_countries and (
+        not allowed_statuses or _normalize_scope_label(status) in allowed_statuses
+    )
+
+
 class _GemMixin:
     _MAPPING_COLUMNS = {
         "rule_id",
@@ -35,10 +66,10 @@ class _GemMixin:
                 "Asset mapping priorities must be unique within each source."
             )
         if not rules["dataset"].isin(
-            {"network", "generation", "storage"}
+            {"network", "generator", "storage"}
         ).all():
             raise ValueError(
-                "Asset mapping dataset must be network, generation, or storage."
+                "Asset mapping dataset must be network, generator, or storage."
             )
         if rules["class"].eq("").any():
             raise ValueError("Asset mapping class values must be present.")

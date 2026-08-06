@@ -120,7 +120,11 @@ def map_timeseries_to_cells(
         dims="uid",
         coords={"uid": result["uid"]},
     )
-    result[variable] = result[variable].where(covered)
+    result[variable] = (
+        result[variable].where(covered, 0.0)
+        if quantity_kind == "extensive"
+        else result[variable].where(covered)
+    )
     return result
 
 

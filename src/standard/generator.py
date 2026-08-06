@@ -1,4 +1,4 @@
-"""Generation asset standardization."""
+"""Generator asset standardization."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 
-from .asset_mapping import _GemMixin
+from .asset_mapping import _asset_in_scope, _GemMixin
 from .base import _Standardizer
 from .schema import (
     _finalize_frame,
@@ -18,21 +18,23 @@ from .schema import (
 )
 
 
-class _GenerationStandardizer(_Standardizer, _GemMixin):
+class _GeneratorStandardizer(_Standardizer, _GemMixin):
     def build(self) -> gpd.GeoDataFrame:
         source_id = self.config["source_ids"][0]
         frame = self._gem_records(source_id, self.options["sheet"])
-        frame = frame[
-            frame["Country/area"].isin(self.options["country_areas"])
-        ].copy()
-        statuses = set(self.options.get("include_statuses", []))
-        if statuses:
-            frame = frame[frame["Status"].isin(statuses)].copy()
+        frame = frame.loc[[
+            _asset_in_scope(
+                row["Country/area"], row["Status"],
+                country_areas=self.options["country_areas"],
+                include_statuses=self.options.get("include_statuses", []),
+            )
+            for _, row in frame.iterrows()
+        ]].copy()
         classification = self._classify_gem(
             frame,
             self.manager.project_root / self.options["class_mapping_file"],
         )
-        frame = frame.loc[classification["dataset"].eq("generation")].copy()
+        frame = frame.loc[classification["dataset"].eq("generator")].copy()
         classification = classification.loc[frame.index]
         capacity = pd.to_numeric(frame["Capacity (MW)"], errors="coerce")
         longitude = pd.to_numeric(frame["Longitude"], errors="coerce")
@@ -54,7 +56,7 @@ class _GenerationStandardizer(_Standardizer, _GemMixin):
             "geometry_method": np.where(
                 longitude.notna() & latitude.notna(), "source_coordinates", pd.NA
             ),
-            "observed_at": self.options.get("observed_at", pd.NA),
+            "observed_at": self.source_observed_at(source_id),
             "valid_from": frame.get("Start year", pd.Series(pd.NA, index=frame.index)).map(
                 _partial_time
             ),
@@ -79,7 +81,7 @@ class _GenerationStandardizer(_Standardizer, _GemMixin):
         })
         result = _finalize_frame(
             result,
-            schema_id="generation",
+            schema_id="generator",
             string_columns=(
                 "project_uid",
                 "name",

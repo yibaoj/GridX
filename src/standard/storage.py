@@ -9,7 +9,7 @@ import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Point
 
-from .asset_mapping import _GemMixin
+from .asset_mapping import _asset_in_scope, _GemMixin
 from .base import _Standardizer
 from .schema import (
     _finalize_frame,
@@ -44,11 +44,15 @@ class _StorageStandardizer(_Standardizer, _GemMixin):
         return result
 
     def _gem_storage(self, source_id: str) -> list[dict[str, object]]:
-        frame = self._gem_records(source_id, self.options["gem_sheet"])
-        frame = frame[frame["Country/area"].isin(self.options["country_areas"])].copy()
-        statuses = set(self.options.get("gem_statuses", []))
-        if statuses:
-            frame = frame[frame["Status"].isin(statuses)].copy()
+        frame = self._gem_records(source_id, self.options["sheet"])
+        frame = frame.loc[[
+            _asset_in_scope(
+                row["Country/area"], row["Status"],
+                country_areas=self.options["country_areas"],
+                include_statuses=self.options.get("include_statuses", []),
+            )
+            for _, row in frame.iterrows()
+        ]].copy()
         classification = self._classify_gem(
             frame,
             self.manager.project_root / self.options["class_mapping_file"],
@@ -74,7 +78,7 @@ class _StorageStandardizer(_Standardizer, _GemMixin):
                     if geometries[position] is not None
                     else pd.NA
                 ),
-                "observed_at": self.options.get("gem_observed_at"),
+                "observed_at": self.source_observed_at(source_id),
                 "valid_from": _partial_time(row.get("Start year")),
                 "valid_to": _partial_time(row.get("Retired year")),
                 "source_id": source_id,
@@ -96,12 +100,13 @@ class _StorageStandardizer(_Standardizer, _GemMixin):
             self.manager.project_root / self.options["class_mapping_file"],
             "doe",
         )
-        statuses = set(self.options.get("doe_statuses", []))
         rows = []
         for project in projects:
-            if str(project.get("Country", "")).strip() != self.options["doe_country"]:
-                continue
-            if statuses and project.get("Status") not in statuses:
+            if not _asset_in_scope(
+                project.get("Country"), project.get("Status"),
+                country_areas=self.options["country_areas"],
+                include_statuses=self.options.get("include_statuses", []),
+            ):
                 continue
             technologies = sorted({
                 subsystem.get("Storage Device", {}).get("Technology Mid-Type")
@@ -151,7 +156,7 @@ class _StorageStandardizer(_Standardizer, _GemMixin):
                 "voltage_kv": None,
                 "geometry": geometry,
                 "geometry_method": "source_coordinates" if geometry else pd.NA,
-                "observed_at": self.options.get("doe_observed_at"),
+                "observed_at": self.source_observed_at(source_id),
                 "valid_from": pd.NA,
                 "valid_to": pd.NA,
                 "source_id": source_id,
