@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import xarray as xr
 
 from src.app import UnitCommitmentApplication
+from src.app.uc.manager import _optimize, _validate_dispatch
 from src.case.backends.manifest import load_pypsa_manifest
 from src.case.aggregate import aggregate_load
 from src.case.manager import _validate_load_profiles
@@ -46,13 +47,26 @@ def test_load_profile_validation_checks_bus_values_and_conservation() -> None:
     )
     cells["demand_mw"].loc[{"uid": "cell:b"}] = 0.0
     buses = pd.DataFrame({"uid": ["bus:1"]})
+    population = pd.DataFrame({
+        "spatial_uid": ["cell:a", "cell:b"], "population": [100.0, 0.0]
+    })
     result = aggregate_load(cells, "bus")
-    report = _validate_load_profiles(result, cells, buses).set_index("name")
+    report = _validate_load_profiles(
+        result, cells, buses, population
+    ).set_index("name")
 
     assert report.at["electrical_bus_mapping", "status"] == "pass"
     assert report.at["finite_values", "status"] == "pass"
     assert report.at["aggregate_conservation", "status"] == "pass"
-    assert report.at["marine_zero_load", "status"] == "pass"
+    assert report.at["zero_auxiliary_load", "status"] == "pass"
+
+
+def test_bus_load_aggregation_preserves_missing_input_signal() -> None:
+    source = _load()
+    source["demand_mw"].loc[{"uid": "cell:b"}] = np.nan
+    result = aggregate_load(source, "bus")
+
+    assert np.isnan(result["demand_mw"].sel(uid="bus:1")).all()
 
 
 def test_time_alignment_supports_coarse_and_fine_steps() -> None:
@@ -128,3 +142,65 @@ def test_uc_list_marks_binary_commitment_inactive_in_continuous_mode() -> None:
     status = table.loc[table["item"].eq("commitment status")].iloc[0]
     assert not status["active"]
     assert status["latex"] == r"u_{g,t}\in\{0,1\}"
+
+
+def test_dispatch_validation_rejects_negative_generator_output() -> None:
+    snapshots = pd.date_range("2024-01-01", periods=2, freq="1h")
+    network = SimpleNamespace(
+        generators=pd.DataFrame(index=["generator:1"]),
+        generators_t=SimpleNamespace(
+            p=pd.DataFrame([[1.0], [-2.0]], index=snapshots, columns=["generator:1"])
+        ),
+        storage_units=pd.DataFrame({"p_nom": [5.0]}, index=["storage:1"]),
+        storage_units_t=SimpleNamespace(
+            p=pd.DataFrame([[0.0], [0.0]], index=snapshots, columns=["storage:1"])
+        ),
+        loads_t=SimpleNamespace(
+            p_set=pd.DataFrame([[1.0], [1.0]], index=snapshots, columns=["load:1"])
+        ),
+    )
+
+    result = _validate_dispatch(network, snapshots, tolerance=1e-3)
+
+    assert not result["dispatch_valid"]
+    assert result["generator_min_mw"] == -2.0
+
+
+def test_rolling_horizon_solves_each_window_and_carries_storage_state() -> None:
+    snapshots = pd.date_range("2024-01-01", periods=4, freq="1h")
+
+    class Network:
+        def __init__(self):
+            self.storage_units = pd.DataFrame(index=["storage:1"])
+            self.storage_units_t = SimpleNamespace(
+                state_of_charge=pd.DataFrame(
+                    np.nan, index=snapshots, columns=self.storage_units.index
+                )
+            )
+            self.objective = None
+            self.windows = []
+
+        def optimize(self, *, snapshots, **_):
+            self.windows.append(tuple(snapshots))
+            self.storage_units_t.state_of_charge.loc[snapshots] = (
+                np.arange(1, len(snapshots) + 1)[:, None]
+            )
+            self.objective = 10.0
+            return "ok", "optimal"
+
+    network = Network()
+    status, condition, objective = _optimize(
+        network,
+        snapshots,
+        solve_mode="rolling_horizon",
+        horizon=2,
+        overlap=0,
+    )
+
+    assert status == "ok"
+    assert condition == "optimal"
+    assert objective == 20.0
+    assert network.windows == [tuple(snapshots[:2]), tuple(snapshots[2:])]
+    assert network.storage_units.at[
+        "storage:1", "state_of_charge_initial"
+    ] == 2.0

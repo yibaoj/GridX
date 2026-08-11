@@ -38,8 +38,10 @@ def build_spatial_cells(
             f"{sorted(missing_priorities)}"
         )
     active_priority = [level for level in level_priority if level in levels]
+    excluded = {str(uid) for uid in options.get("exclude_admin_uids", [])}
     spatial_units = spatial.loc[
-        spatial["level"].isin(levels), ["uid", "level", "geometry"]
+        spatial["level"].isin(levels) & ~spatial["uid"].astype(str).isin(excluded),
+        ["uid", "level", "geometry"],
     ].copy()
     if spatial_units.empty:
         available = sorted(spatial["level"].dropna().unique())

@@ -3,31 +3,29 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>电力系统数据观测</title>
+  <title>GridX 网探</title>
+  <link rel="icon" href="data:,">
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <main class="workspace">
-    <aside class="sidebar" aria-label="数据图层">
+    <aside class="sidebar" aria-label="GridX控制栏">
       <header class="brand">
-        <span class="brand-mark" aria-hidden="true">PS</span>
-        <div>
-          <h1 id="site-title">电力系统数据观测</h1>
-          <p id="site-subtitle">Spatial data workspace</p>
-        </div>
+        <span class="gridx-mark" aria-hidden="true"><i></i><i></i></span>
+        <div class="brand-name"><strong>GridX</strong><span>网探</span></div>
       </header>
 
-      <section class="sidebar-section">
-        <p class="section-label">数据图层</p>
-        <nav id="layer-list" class="layer-list"></nav>
+      <section class="sidebar-section flow-section">
+        <p class="section-label">流程</p>
+        <nav id="stage-list" class="stage-list"></nav>
       </section>
 
       <section class="sidebar-section display-options">
         <p class="section-label">显示</p>
         <label class="toggle-row" for="boundary-toggle">
-          <span><i data-lucide="map"></i>行政边界</span>
+          <span><i data-lucide="map"></i>空间边界</span>
           <input id="boundary-toggle" type="checkbox" checked>
         </label>
         <label class="toggle-row" for="basemap-toggle">
@@ -36,48 +34,53 @@
         </label>
       </section>
 
+      <section class="sidebar-section updates-section">
+        <p class="section-label">更新</p>
+        <div id="news-feed" class="news-feed"></div>
+      </section>
+
       <footer class="sidebar-footer">
-        <span class="status-dot"></span>
-        <span>Local data</span>
+        <i data-lucide="eye"></i>
+        <span>访问量</span>
+        <strong id="visit-count">--</strong>
       </footer>
     </aside>
 
-    <section class="map-panel" aria-label="空间数据地图">
-      <div id="map"></div>
-      <div class="map-heading">
-        <span id="layer-kicker">DATA LAYER</span>
-        <h2 id="layer-title">正在读取</h2>
-        <p id="layer-description"></p>
-      </div>
-      <button id="news-toggle" class="icon-button" type="button" title="显示研究更新" aria-label="显示研究更新">
-        <i data-lucide="panel-right-open"></i>
-      </button>
-      <div id="legend" class="map-legend" hidden></div>
-      <div class="map-status">
-        <span id="record-count">--</span>
-        <span id="value-total">--</span>
-      </div>
+    <section class="main-panel">
+      <section id="map-view" class="view active" aria-label="空间数据地图">
+        <div id="map"></div>
+        <div class="layer-picker">
+          <button id="layer-current" type="button" aria-haspopup="true">
+            <i data-lucide="factory"></i><span>发电</span><i data-lucide="chevron-down"></i>
+          </button>
+          <div id="layer-menu" class="layer-menu"></div>
+          <div id="resource-options" class="resource-options" hidden></div>
+        </div>
+        <div id="legend" class="map-legend" hidden></div>
+        <div class="map-status">
+          <strong id="stage-title">标准层</strong>
+          <span id="record-count">--</span>
+          <span id="value-total">--</span>
+        </div>
+      </section>
+
+      <section id="application-view" class="view application-view" aria-label="生产模拟结果">
+        <header class="application-header">
+          <div><span>应用层</span><h1>电力系统生产模拟</h1></div>
+          <dl id="application-summary"></dl>
+        </header>
+        <div id="dispatch-chart" class="dispatch-chart"></div>
+      </section>
+
       <div id="loading" class="loading" role="status">
         <span></span><span></span><span></span>
       </div>
     </section>
-
-    <aside id="news-panel" class="news-panel" aria-label="研究更新">
-      <header class="news-header">
-        <div>
-          <p class="section-label">LIVE NOTES</p>
-          <h2>研究更新</h2>
-        </div>
-        <button id="news-close" class="icon-button" type="button" title="关闭研究更新" aria-label="关闭研究更新">
-          <i data-lucide="x"></i>
-        </button>
-      </header>
-      <div id="news-feed" class="news-feed"></div>
-    </aside>
   </main>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <script src="https://unpkg.com/echarts@5.5.1/dist/echarts.min.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

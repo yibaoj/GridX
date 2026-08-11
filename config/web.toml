@@ -1,14 +1,20 @@
 [site]
-title = "中国电力系统数据观测"
-subtitle = "Spatial data workspace"
+title = "GridX"
+title_zh = "网探"
+subtitle = "Power system observatory"
 
 [server]
 host = "127.0.0.1"
 port = 8765
 
 [data]
+standard_config = "config/standard_data.toml"
 mapping_config = "config/mapping.toml"
-network_min_voltage_kv = 500
+case_config = "config/case.toml"
+uc_config = "config/uc.toml"
+output_root = "outputs/web"
+plot_year = 2024
+geometry_simplify_degrees = 0.01
 
 [map]
 center = [35.5, 104.0]
@@ -17,57 +23,90 @@ min_zoom = 3
 max_zoom = 10
 tile_url = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
 tile_attribution = "&copy; OpenStreetMap contributors &copy; CARTO"
-default_layer = "population"
+default_stage = "standard"
+default_layer = "generator"
 
-[[layers]]
-id = "spatial"
-label = "空间单元"
-description = "标准空间单元与行政归属"
-icon = "grid-2x2"
-unit = "cells"
+[[stages]]
+id = "standard"
+label = "标准层"
+description = "数据规范"
+icon = "database"
 
-[[layers]]
-id = "population"
-label = "人口"
-description = "标准空间单元人口"
-icon = "users"
-unit = "people"
+[[stages]]
+id = "mapping"
+label = "映射层"
+description = "时空统一"
+icon = "workflow"
+
+[[stages]]
+id = "case"
+label = "算例层"
+description = "系统算例"
+icon = "cpu"
+
+[[stages]]
+id = "application"
+label = "应用层"
+description = "运行模拟"
+icon = "activity"
 
 [[layers]]
 id = "generator"
 label = "发电"
-description = "按空间单元聚合的装机"
 icon = "factory"
 unit = "MW"
 
 [[layers]]
 id = "storage"
 label = "储能"
-description = "按空间单元聚合的功率容量"
 icon = "battery-charging"
 unit = "MW"
 
 [[layers]]
 id = "network"
-label = "输电网络"
-description = "最大连通图中的高压母线与支路"
+label = "网络"
 icon = "network"
 unit = "kV"
 
+[[layers]]
+id = "load"
+label = "负荷"
+icon = "gauge"
+unit = "MW"
+
+[[layers]]
+id = "resource"
+label = "资源"
+icon = "wind"
+unit = "p.u."
+
+[[layers]]
+id = "population"
+label = "人口"
+icon = "users"
+unit = "人"
+
+[[news]]
+date = "2026-08-07"
+title = "网站绘图数据完成离线化"
+content = "三层地图共用后端统计口径，网络与年度时序无需请求时计算。"
+
+[[news]]
+date = "2026-08-06"
+title = "算例与应用输出完成解耦"
+content = "算例可直接加载，生产模拟保存逐设备时序。"
+
+[[news]]
+date = "2026-08-05"
+title = "负荷映射校验完善"
+content = "辅助权重、总量守恒和节点覆盖进入统一检查。"
+
 [[news]]
 date = "2026-08-03"
-title = "海陆空间范围已统一"
-content = "省级行政边界与海洋功能区进入同一 spatial 数据集。"
-tag = "SPATIAL"
+title = "海陆空间范围统一"
+content = "行政边界与海洋功能区进入同一空间数据集。"
 
 [[news]]
 date = "2026-08-02"
-title = "映射数据接口完成整理"
-content = "发电、储能、人口和电网对象均可通过稳定的数据集标识读取。"
-tag = "MAPPING"
-
-[[news]]
-date = "2026-08-01"
-title = "ERA5 资源数据完成标准化"
-content = "陆上风电、海上风电、光伏与径流式水电资源采用统一时空结构。"
-tag = "RESOURCE"
+title = "参数契约接入PyPSA"
+content = "技术经济参数的单位、转换和缺失检查统一管理。"

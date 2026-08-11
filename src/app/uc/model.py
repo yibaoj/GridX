@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pandas as pd
+import xarray as xr
 
 from ...case import PowerSystemCase
 
@@ -15,13 +16,14 @@ class UnitCommitmentResult:
 
     case: PowerSystemCase
     network: object
+    data: xr.Dataset
     status: str
     condition: str
     snapshots: pd.DatetimeIndex
     summary: pd.Series
 
     def plot(self, **kwargs):
-        """Return a colored stacked production-simulation figure."""
+        """Return a figure from saved operation data without writing a file."""
 
         from .plot import plot_dispatch
 

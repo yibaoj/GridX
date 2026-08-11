@@ -256,7 +256,9 @@ def _add_generators(
     minimum_output = _manifest_values(
         manifest, case.generator, "generator_minimum_output"
     )
-    minimum_output[variable_mask.to_numpy()] = 0.0
+    # Aggregated continuous fleets represent a divisible number of online units.
+    # A unit-level minimum output only applies once commitment is activated.
+    minimum_output[:] = 0.0
     kwargs = {
         "bus": data.bus_uid.astype(str).to_numpy(),
         "p_nom": pd.to_numeric(data.capacity_mw, errors="coerce").fillna(0).to_numpy(),

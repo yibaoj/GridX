@@ -27,7 +27,7 @@ conda activate env-py313
 | `src/mapping/` | 统一空间单元、时间轴及电气母线映射 |
 | `src/case/` | 构建后端无关算例并适配PyPSA等求解框架 |
 | `src/app/` | 基于PowerSystemCase运行UC/ED等应用并整理结果 |
-| `src/web/` | 只读展示standard/mapping结果 |
+| `src/web/` | 只读展示standard/mapping/case/application预生成结果 |
 | `config/raw_data_sources.csv` | 原始数据URL、规范本地路径和下载选项 |
 | `config/standard_data.toml` | dataset依赖及标准化参数 |
 | `config/class_mapping.csv` | generator/storage的有序分类规则 |
@@ -218,6 +218,10 @@ mapping.schema(["network", "generator"])
 
 load是extensive量，拆分后保持总量；resource是intensive量，使用面积加权平均。
 `method="auxiliary"`使用映射至目标cell后的辅助值并在每个源区域内归一化。
+辅助值为0的目标cell负荷严格为0；配置在
+`uncovered_auxiliary_nearest_levels`中的正权重未覆盖cell先关联最近源区域，再参与该源
+区域的归一化；其他未覆盖cell保留NaN并进入case validation。代码不根据
+`marine_zone`标签统一清零。
 全部结果写入`outputs/mapping/`，不会覆盖standard数据。
 
 ```python
@@ -242,6 +246,10 @@ case_manager = PowerSystemCaseManager(
     standard_data=standard_data,
 )
 case = case_manager.build()
+case_manager.check()
+generator = case_manager.load("generator")
+# Reconstruct the complete case without rebuilding it.
+case = case_manager.load()
 case.validation
 case.parameter_manifest()
 pypsa_network = case.to_pypsa(strict=False)
@@ -264,11 +272,7 @@ co2_intensity / efficiency`组装，carrier细化到`class:subclass`。规划扩
 case绘图与standard/mapping保持相同API，只返回Figure：
 
 ```python
-figure = case.plot(
-    "network",
-    spatial=standard_data.load("spatial"),
-    map_crs=mapping.options["metric_crs"],
-)
+figure = case_manager.plot("network")
 ```
 
 ## 应用层
@@ -283,19 +287,27 @@ from src.app import UnitCommitmentApplication
 application = UnitCommitmentApplication(case, "config/uc.toml")
 formulation = application.list()
 result = application.run()
+saved_result = application.load()
 realized_formulation = application.list(active_only=True)
-figure = result.plot(
+figure = application.plot(
     start="2024-07-15 00:00",
     end="2024-07-15 23:00",
 )
 ```
 
+case的七类公共数据写入`outputs/case/`；`load(dataset_id)`可独立读取，`load()`恢复完整
+`PowerSystemCase`。case和application的plot接口均只返回Figure，不自动保存图片。
+
 `application.list()`按sets、parameters、variables、objective、系统约束和设备约束顺序
 返回LaTeX符号，并标记active状态；求解后再次调用还会对照Linopy中实际存在的变量和
 约束。当前`continuous`模式不激活status/startup/shutdown二进制变量及最小开停机约束。
 `strict_case=true`会拒绝required参数使用manifest fallback；`strict_case=false`仅适合
-流程验证。达到求解时限但已有可行解时，结果保留
-`termination_condition="time_limit"`且`is_optimal=false`。
+流程验证。UC完成后，逐generator、storage、load、AC line、transformer和link的原始时序
+写入`outputs/app/uc/timeseries.nc`，求解摘要写入`summary.json`。保存前会检查有限值、
+发电非负和储能功率上限；未通过检查的求解中间量不会覆盖已有结果。
+`solve_mode="rolling_horizon"`按配置窗口顺序求解并传递储能SOC。500 kV+全国网络适合
+算例检查，但日/周交互展示应使用已说明分辨率的应用算例；当前验证结果采用900 kV+
+筛选后的1,000 kV交流最大连通网。
 
 ## Notebook与应用
 
@@ -306,18 +318,21 @@ figure = result.plot(
 - `uc_exp.ipynb`：PyPSA一日UC demo，不含N-1/N-k安全约束。
 - `LOAD_WEIGHTING.md`：工业、人口和夜间灯光组合负荷权重方案。
 
-网站使用只读数据接口：
+GridX（网探）网站只读取`outputs/web/`中的离线绘图数据。先调用与后端plot共享的准备
+函数生成压缩GeoJSON和图例元数据，再启动只读服务：
 
 ```bash
+conda run -n env-py313 python -m src.web.build --config config/web.toml
 conda run -n env-py313 python -m src.web.app
 ```
 
-访问`http://127.0.0.1:8765`。
+网站请求期间不再启动GeoPandas/Xarray聚合；预压缩文件由HTTP服务直接发送。访问
+`http://127.0.0.1:8765`。
 
 ## 重要限制
 
 - OSM是社区维护的候选网络，不是经审定的中国电网模型。
-- GEM到station的匹配是地理候选，不代表已核实并网站和接入电压。
+- GEM到station的匹配是地理候选，不代表已核实并网点和接入电压。
 - ERA5径流代理不能直接替代电站级水文模型。
 - 通用技术经济参数、线路参数和燃料价格必须在具体case中进行地区与年份校核。
 - 当前transformer/converter和部分generator/storage参数覆盖不足，正式仿真应采用

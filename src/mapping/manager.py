@@ -108,9 +108,6 @@ class SpatiotemporalMappingManager:
                 and auxiliary_dataset == "population"
             ),
         )
-        population.loc[
-            population["spatial_level"].eq("marine_zone"), "population"
-        ] = 0.0
         annotate_schema(population, "population")
         self._write_geodataframe("population", population)
 
@@ -153,6 +150,9 @@ class SpatiotemporalMappingManager:
             metric_crs=self.options["metric_crs"],
             auxiliary_cells=auxiliary_cells,
             auxiliary_value=auxiliary_value,
+            uncovered_auxiliary_nearest_levels=list(
+                load_options.get("uncovered_auxiliary_nearest_levels", [])
+            ),
             conservation_tolerance=float(load_options["conservation_tolerance"]),
         )
         load_source.close()

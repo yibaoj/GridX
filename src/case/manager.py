@@ -14,11 +14,12 @@ from ..mapping import MappingData, SpatiotemporalMappingManager
 from ..standard import NetworkData, StandardDataManager
 from .aggregate import aggregate_assets, aggregate_load
 from .backends.manifest import load_pypsa_manifest
+from .io import CASE_DATASETS, case_outputs, load_case, load_case_dataset, save_case
 from .model import CaseComponent, CaseNetwork, PowerSystemCase
 from .network import filter_network
 from .parameters import resolve_parameters
 from .remap import remap_assets, remap_load
-from .time import common_time, select_time
+from .time import select_time
 
 
 class PowerSystemCaseManager:
@@ -35,6 +36,7 @@ class PowerSystemCaseManager:
             path = Path(__file__).resolve().parents[2] / path
         with path.resolve().open("rb") as file:
             self.config = tomllib.load(file)
+        self.output_root = path.resolve().parents[1] / self.config["general"]["output_root"]
         if standard_data is None and isinstance(
             mapped_data, SpatiotemporalMappingManager
         ):
@@ -42,14 +44,16 @@ class PowerSystemCaseManager:
         self.standard_data = standard_data or StandardDataManager(
             path.resolve().parents[1] / "config/standard_data.toml"
         )
-        self.mapped_data = (
-            mapped_data.load() if isinstance(mapped_data, SpatiotemporalMappingManager)
-            else mapped_data
-            if mapped_data is not None
+        self.mapping_manager = (
+            mapped_data if isinstance(mapped_data, SpatiotemporalMappingManager)
             else SpatiotemporalMappingManager(
                 path.resolve().parents[1] / "config/mapping.toml",
                 self.standard_data,
-            ).load()
+            )
+        )
+        self.mapped_data = (
+            None if isinstance(mapped_data, SpatiotemporalMappingManager)
+            else mapped_data
         )
 
     def build(self) -> PowerSystemCase:
@@ -57,10 +61,11 @@ class PowerSystemCaseManager:
 
         options = self.config
         general = options["general"]
+        mapped_data = self.mapped_data or self.mapping_manager.load()
         network_data, branch_mapping = filter_network(
-            self.mapped_data.network, options["network"]
+            mapped_data.network, options["network"]
         )
-        cells = self.mapped_data.spatial
+        cells = mapped_data.spatial
         bus_subclasses = list(options["network"].get("bus_subclasses", []))
         common = {
             "buses": network_data.bus,
@@ -72,7 +77,7 @@ class PowerSystemCaseManager:
 
         generator = remap_assets(
             _filter_assets(
-                self.mapped_data.generator,
+                mapped_data.generator,
                 options["assets"]["generator"],
                 "capacity_mw",
             ),
@@ -82,7 +87,7 @@ class PowerSystemCaseManager:
         )
         storage = remap_assets(
             _filter_assets(
-                self.mapped_data.storage,
+                mapped_data.storage,
                 options["assets"]["storage"],
                 "power_capacity_mw",
             ),
@@ -91,12 +96,13 @@ class PowerSystemCaseManager:
             **common,
         )
         load = remap_load(
-            select_time(self.mapped_data.load, options["time"]),
+            select_time(mapped_data.load, options["time"]),
             options=options["load_bus_mapping"],
             **common,
         )
-        resource = select_time(self.mapped_data.resource, options["time"])
-        load, resource = common_time(load, resource)
+        # Resource remains the mapped-layer product. Backend adapters select the
+        # snapshots required by the case load when constructing a simulation.
+        resource = mapped_data.resource
         load_cells = load
 
         parameter_source = self.standard_data.load("parameter")
@@ -170,6 +176,7 @@ class PowerSystemCaseManager:
             storage,
             load,
             load_cells,
+            mapped_data.population,
             resource,
             parameters,
             load_pypsa_manifest(
@@ -178,7 +185,7 @@ class PowerSystemCaseManager:
             generator_membership,
             dict(options["backend"]["pypsa"].get("resource_class_mapping", {})),
         )
-        return PowerSystemCase(
+        case = PowerSystemCase(
             network=network,
             generator=CaseComponent(
                 generator, parameters["generator"], generator_membership
@@ -187,12 +194,54 @@ class PowerSystemCaseManager:
                 storage, parameters["storage"], storage_membership
             ),
             load=load,
-            spatial=self.mapped_data.spatial,
+            spatial=mapped_data.spatial,
             resource=resource,
-            population=self.mapped_data.population,
+            population=mapped_data.population,
             validation=validation,
             config=self.config,
         )
+        save_case(case, self.output_root)
+        return case
+
+    def load(self, dataset_id: str | None = None) -> object:
+        """Load one case dataset, or the complete reusable case."""
+
+        paths = case_outputs(self.output_root)
+        if dataset_id is not None:
+            if dataset_id not in CASE_DATASETS:
+                raise KeyError(
+                    f"Unknown case dataset {dataset_id!r}; expected {CASE_DATASETS}."
+                )
+            paths = tuple(
+                path for path in paths
+                if _case_path_dataset(path, self.output_root) == dataset_id
+            )
+        missing = [path for path in paths if not path.exists()]
+        if missing:
+            raise FileNotFoundError(
+                "Case outputs are incomplete; run build() first. Missing: "
+                f"{[str(path) for path in missing[:5]]}"
+            )
+        if dataset_id is None:
+            return load_case(self.output_root, self.config)
+        return load_case_dataset(self.output_root, dataset_id, self.config)
+
+    def check(self) -> pd.Series:
+        """Report whether every public case dataset is available."""
+
+        paths = case_outputs(self.output_root)
+        return pd.Series({
+            dataset_id: all(
+                path.exists() for path in paths
+                if _case_path_dataset(path, self.output_root) == dataset_id
+            )
+            for dataset_id in CASE_DATASETS
+        }, name="output_available")
+
+    def plot(self, dataset_id: str, **kwargs: object):
+        """Return a case figure without displaying or saving it."""
+
+        return self.load().plot(dataset_id, **kwargs)
 
 
 def _filter_assets(
@@ -213,6 +262,11 @@ def _filter_assets(
     ].copy()
 
 
+def _case_path_dataset(path: Path, root: Path) -> str:
+    relative = path.relative_to(root)
+    return relative.parts[0].split(".", 1)[0]
+
+
 def _component(data: gpd.GeoDataFrame, parameter: pd.DataFrame) -> CaseComponent:
     membership = pd.DataFrame({
         "source_uid": data["uid"], "aggregate_uid": data["uid"], "weight": 1.0
@@ -226,6 +280,7 @@ def _validate_case(
     storage: gpd.GeoDataFrame,
     load,
     load_cells,
+    population: gpd.GeoDataFrame,
     resource,
     parameters: dict[str, pd.DataFrame],
     parameter_manifest,
@@ -247,9 +302,16 @@ def _validate_case(
     }, {
         "check": "time_alignment", "component": "timeseries",
         "name": "common_timestamps",
-        "status": "pass" if load.time.equals(resource.time) else "fail",
+        "status": (
+            "pass"
+            if pd.Index(load.time.values).isin(resource.time.values).all()
+            else "fail"
+        ),
         "value": load.sizes["time"],
-        "detail": f"{load.attrs.get('time_step')} in {load.attrs.get('timezone')}",
+        "detail": (
+            f"{load.sizes['time']} load timestamps are covered by the "
+            f"{resource.sizes['time']}-timestamp resource series"
+        ),
     }, {
         "check": "aggregation_limit", "component": "generator",
         "name": "clustered_unit_commitment",
@@ -289,14 +351,21 @@ def _validate_case(
         "value": covered / len(variable) if len(variable) else 1.0,
         "detail": f"{covered}/{len(variable)} variable generators have a mapped profile",
     }])
-    load_coverage = _validate_load_profiles(load, load_cells, network.bus)
+    load_coverage = _validate_load_profiles(
+        load, load_cells, network.bus, population
+    )
     return pd.concat(
         [pd.DataFrame(rows), coverage, resource_coverage, load_coverage],
         ignore_index=True,
     )
 
 
-def _validate_load_profiles(load, load_cells, buses: pd.DataFrame) -> pd.DataFrame:
+def _validate_load_profiles(
+    load,
+    load_cells,
+    buses: pd.DataFrame,
+    population: pd.DataFrame,
+) -> pd.DataFrame:
     """Check electrical mapping, values, profiles, conservation, and marine load."""
 
     variable = "demand_mw"
@@ -306,7 +375,9 @@ def _validate_load_profiles(load, load_cells, buses: pd.DataFrame) -> pd.DataFra
     bus_uids = set(buses["uid"].astype(str))
     missing_buses = sorted(set(load_uids).difference(bus_uids))
     finite = np.isfinite(values)
+    cell_finite = np.isfinite(cell_values)
     all_nan = np.isnan(values).all(axis=(0, 2))
+    cell_all_nan = np.isnan(cell_values).all(axis=(0, 2))
     all_zero = finite.all(axis=(0, 2)) & np.isclose(values, 0.0).all(axis=(0, 2))
 
     source_total = np.asarray(
@@ -324,21 +395,24 @@ def _validate_load_profiles(load, load_cells, buses: pd.DataFrame) -> pd.DataFra
         if totals_finite and source_total.size else np.nan
     )
 
-    levels = load_cells.coords.get("spatial_level")
-    marine = (
-        levels.values.astype(str) == "marine_zone"
-        if levels is not None else np.zeros(load_cells.sizes["uid"], dtype=bool)
-    )
-    marine_values = cell_values[:, marine, :]
-    marine_valid = (
-        np.isfinite(marine_values).all()
-        and np.isclose(marine_values, 0.0, atol=1e-9).all()
-    ) if marine.any() else True
-    marine_nonzero = int(
-        np.count_nonzero(~np.isclose(marine_values, 0.0, atol=1e-9))
-    ) if marine.any() else 0
+    auxiliary = population.set_index("spatial_uid")["population"]
+    cell_auxiliary = pd.Series(
+        load_cells["uid"].values.astype(str)
+    ).map(auxiliary)
+    zero_auxiliary = cell_auxiliary.eq(0).to_numpy()
+    zero_values = cell_values[:, zero_auxiliary, :]
+    zero_valid = (
+        np.isfinite(zero_values).all()
+        and np.isclose(zero_values, 0.0, atol=1e-9).all()
+    ) if zero_auxiliary.any() else True
+    zero_violations = int(
+        np.count_nonzero(~np.isclose(zero_values, 0.0, atol=1e-9))
+    ) if zero_auxiliary.any() else 0
 
-    profile_status = "fail" if all_nan.any() else "warning" if all_zero.any() else "pass"
+    profile_status = (
+        "fail" if cell_all_nan.any() or all_nan.any()
+        else "warning" if all_zero.any() else "pass"
+    )
     return pd.DataFrame([
         {
             "check": "load_profile_coverage", "component": "load",
@@ -350,15 +424,22 @@ def _validate_load_profiles(load, load_cells, buses: pd.DataFrame) -> pd.DataFra
         }, {
             "check": "load_profile_coverage", "component": "load",
             "name": "finite_values",
-            "status": "pass" if finite.all() else "fail",
-            "value": float(finite.mean()) if finite.size else 1.0,
-            "detail": f"{int((~finite).sum())}/{finite.size} values are NaN or infinite",
+            "status": "pass" if finite.all() and cell_finite.all() else "fail",
+            "value": float(cell_finite.mean()) if cell_finite.size else 1.0,
+            "detail": (
+                f"cell_nonfinite={int((~cell_finite).sum())}; "
+                f"bus_nonfinite={int((~finite).sum())}"
+            ),
         }, {
             "check": "load_profile_coverage", "component": "load",
             "name": "profile_quality",
             "status": profile_status,
             "value": float((~all_nan & ~all_zero).mean()) if len(load_uids) else 1.0,
-            "detail": f"all_nan={int(all_nan.sum())}; all_zero={int(all_zero.sum())}",
+            "detail": (
+                f"cell_all_nan={int(cell_all_nan.sum())}; "
+                f"bus_all_nan={int(all_nan.sum())}; "
+                f"bus_all_zero={int(all_zero.sum())}"
+            ),
         }, {
             "check": "load_profile_coverage", "component": "load",
             "name": "aggregate_conservation",
@@ -367,10 +448,13 @@ def _validate_load_profiles(load, load_cells, buses: pd.DataFrame) -> pd.DataFra
             "detail": "Maximum absolute source-to-bus load error in MW",
         }, {
             "check": "load_profile_coverage", "component": "load",
-            "name": "marine_zero_load",
-            "status": "not_applicable" if not marine.any()
-            else "pass" if marine_valid else "fail",
-            "value": marine_nonzero,
-            "detail": f"{int(marine.sum())} marine cells; {marine_nonzero} nonzero or non-finite values",
+            "name": "zero_auxiliary_load",
+            "status": "not_applicable" if not zero_auxiliary.any()
+            else "pass" if zero_valid else "fail",
+            "value": zero_violations,
+            "detail": (
+                f"{int(zero_auxiliary.sum())} zero-population cells; "
+                f"{zero_violations} nonzero or non-finite values"
+            ),
         },
     ])

@@ -6,12 +6,12 @@ from collections.abc import Iterable
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
-import pandas as pd
 import xarray as xr
 
 from ..mapping.model import MappedNetwork
 from ..mapping.plot import (
     asset_pie_map,
+    plot_load as plot_mapped_load,
     plot_network as plot_mapped_network,
     plot_population as plot_mapped_population,
     plot_resource as plot_mapped_resource,
@@ -20,7 +20,6 @@ from ..mapping.plot import (
 from ..standard.plot import (
     DEFAULT_MAP_CRS,
     PlotResult,
-    continuous_map,
     filter_spatial_levels,
 )
 from .model import PowerSystemCase
@@ -67,6 +66,10 @@ def plot_case(
             return plot_mapped_population(case.population, **common, **kwargs)
         if component == "resource":
             return plot_mapped_resource(case.resource, **common, **kwargs)
+        if component == "load":
+            return plot_mapped_load(
+                load_with_bus_geometry(case), **common, **kwargs
+            )
         if component == "network":
             network = MappedNetwork(
                 case.network.bus.data,
@@ -100,46 +103,6 @@ def plot_case(
                 map_crs,
                 china_inset,
             )
-        return _plot_load(
-            case,
-            spatial=background,
-            map_crs=map_crs,
-            china_inset=china_inset,
-            **kwargs,
-        )
-
-
-def _plot_load(
-    case: PowerSystemCase,
-    *,
-    spatial: gpd.GeoDataFrame,
-    map_crs: str,
-    china_inset: bool | None,
-    start: object = None,
-    end: object = None,
-    class_name: str | None = None,
-    title: str = "Case mean nodal load",
-    **_: object,
-):
-    data = case.load["demand_mw"].sel(time=slice(start, end))
-    if class_name is not None:
-        data = data.sel(**{"class": class_name})
-    else:
-        data = data.sum("class")
-    values = data.mean("time").compute().to_series()
-    buses = case.network.bus.data.loc[
-        case.network.bus.data["uid"].astype(str).isin(values.index.astype(str))
-    ].copy()
-    buses["_value"] = buses["uid"].astype(str).map(values)
-    return continuous_map(
-        buses,
-        "_value",
-        spatial=spatial,
-        title=title,
-        label="Mean load (MW)",
-        map_crs=map_crs,
-        china_inset=china_inset,
-    )
 
 
 def _background(cells: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -151,3 +114,22 @@ def _background(cells: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     return frame.rename(columns={
         "admin_uid": "uid", "spatial_level": "level",
     })
+
+
+def load_with_bus_geometry(case: PowerSystemCase) -> xr.Dataset:
+    """Attach case-bus geometry to nodal load for shared map preparation."""
+
+    data = case.load
+    buses = case.network.bus.data.set_index("uid")
+    uids = data["uid"].values.astype(str)
+    geometry = buses.geometry.reindex(uids)
+    if geometry.isna().any():
+        missing = geometry.index[geometry.isna()].tolist()[:5]
+        raise ValueError(f"Case load references buses without geometry: {missing}")
+    result = data.assign_coords(
+        geometry=("uid", geometry.to_wkt().to_numpy()),
+        geometry_method=("uid", ["case_bus_geometry"] * len(uids)),
+        location=("uid", uids),
+    )
+    result.attrs["crs"] = str(case.network.bus.data.crs)
+    return result

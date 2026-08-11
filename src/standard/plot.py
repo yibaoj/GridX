@@ -67,6 +67,44 @@ CATEGORY_MARKERS = {
     "thermal_storage": "^",
     "capacitor_storage": "P",
 }
+CATEGORY_LABELS_ZH = {
+    "bioenergy": "生物质",
+    "coal": "煤电",
+    "gas": "天然气",
+    "geothermal": "地热",
+    "nuclear": "核电",
+    "hydropower": "水电",
+    "solar": "光伏",
+    "wind": "风电",
+    "other": "其他",
+    "battery": "电化学",
+    "battery_storage": "电化学",
+    "pumped_hydro": "抽水蓄能",
+    "pumped_storage": "抽水蓄能",
+    "thermal_storage": "热储能",
+    "compressed_air": "压缩空气",
+    "compressed_air_storage": "压缩空气",
+    "capacitor_storage": "超级电容",
+    "onshore": "陆上风电",
+    "offshore_fixed": "海上风电",
+    "offshore_floating": "海上风电",
+    "offshore_unspecified": "海上风电",
+    "run_of_river": "径流水电",
+    "utility_scale_pv": "光伏",
+    "electric_load": "电力负荷",
+}
+NETWORK_VOLTAGE_COLORS = {
+    110.0: "#56b4c6",
+    220.0: "#4e79a7",
+    330.0: "#59a14f",
+    500.0: "#f28e2b",
+    660.0: "#e15759",
+    750.0: "#8f6bb3",
+    800.0: "#9c755f",
+    1000.0: "#e377a8",
+    1100.0: "#bcbd22",
+    1150.0: "#76b7b2",
+}
 
 
 def province_frame(spatial: gpd.GeoDataFrame | None) -> gpd.GeoDataFrame | None:
@@ -229,6 +267,14 @@ def _format_capacity(value: float) -> str:
     return f"{value:g} MW"
 
 
+def capacity_legend_values(reference: float) -> list[float]:
+    """Return the capacity examples shared by static and interactive legends."""
+
+    return sorted({
+        _nice_capacity(reference * fraction) for fraction in (0.1, 0.5, 1.0)
+    })
+
+
 def add_asset_legends(
     axis: plt.Axes,
     class_handles: list,
@@ -243,13 +289,10 @@ def add_asset_legends(
         ncol=2,
         frameon=False,
         fontsize=8,
-        title="Class",
+        title="类别",
     )
     axis.add_artist(class_legend)
-    values = sorted({
-        _nice_capacity(capacity_reference * fraction)
-        for fraction in (0.1, 0.5, 1.0)
-    })
+    values = capacity_legend_values(capacity_reference)
     size_handles = [
         Line2D(
             [0],
@@ -270,9 +313,144 @@ def add_asset_legends(
         bbox_to_anchor=(0.095, 0.88),
         frameon=False,
         fontsize=8,
-        title="Total capacity",
+        title="总容量",
         labelspacing=0.8,
     )
+
+
+def class_label(value: object) -> str:
+    """Return the shared Chinese display label for a standardized class."""
+
+    return CATEGORY_LABELS_ZH.get(str(value), str(value).replace("_", " "))
+
+
+def prepare_population_plot(data: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Prepare the population values used by static and web maps."""
+
+    frame = data.copy()
+    frame["_raw_value"] = pd.to_numeric(
+        frame["population"], errors="coerce"
+    ).fillna(0).clip(lower=0)
+    frame["_value"] = np.log10(frame["_raw_value"] + 1)
+    return frame
+
+
+def prepare_timeseries_plot(
+    data: xr.Dataset,
+    *,
+    variable: str,
+    year: int,
+    class_name: str | None,
+    quantity: str,
+) -> dict[str, tuple[gpd.GeoDataFrame, dict[str, object]]]:
+    """Prepare annual class maps using the same aggregation for every renderer."""
+
+    available = data["class"].values.astype(str).tolist()
+    classes = [str(class_name)] if class_name else available
+    unknown = set(classes).difference(available)
+    if unknown:
+        raise KeyError(f"Unknown class values: {sorted(unknown)}")
+    geometry = _xarray_geometry(data)
+    prepared = {}
+    for item in classes:
+        values = data[variable].sel(time=str(year), **{"class": item})
+        if values.sizes.get("time", 0) == 0:
+            raise ValueError(f"No {year} data are available for class={item!r}.")
+        if quantity == "load":
+            display = values.sum("time").compute().values / 1e6
+            label = f"{year} 年用电量（TWh）"
+            title = f"{class_label(item)}：{year} 年用电量"
+            limits = (None, None)
+            unit = "TWh"
+        else:
+            display = values.mean("time").compute().values
+            label = f"{year} 年平均容量因子（p.u.）"
+            title = f"{class_label(item)}：{year} 年平均容量因子"
+            limits = (0.0, 1.0)
+            unit = "p.u."
+        frame = gpd.GeoDataFrame(
+            {"_value": display}, geometry=geometry, crs=data.attrs["crs"]
+        )
+        prepared[item] = (frame, {
+            "class": item,
+            "label": label,
+            "title": title,
+            "unit": unit,
+            "year": year,
+            "vmin": limits[0],
+            "vmax": limits[1],
+        })
+    return prepared
+
+
+def prepare_asset_points(
+    data: gpd.GeoDataFrame,
+    capacity_column: str,
+) -> tuple[gpd.GeoDataFrame, float, list[str]]:
+    """Prepare point assets and the common capacity-size reference."""
+
+    capacity = pd.to_numeric(data[capacity_column], errors="coerce")
+    frame = data.loc[data.geometry.notna() & capacity.gt(0)].copy()
+    frame["_class"] = frame["class"].astype("string").fillna("other")
+    frame["_capacity"] = capacity.loc[frame.index]
+    reference = max(float(frame["_capacity"].quantile(0.99)), 1.0)
+    frame["_marker_size"] = 2 + 24 * np.sqrt(
+        (frame["_capacity"] / reference).clip(0, 1)
+    )
+    classes = frame["_class"].value_counts().index.astype(str).tolist()
+    return frame, reference, classes
+
+
+def _single_voltage(value: object) -> float:
+    if value is None or value is pd.NA:
+        return np.nan
+    if isinstance(value, str):
+        values = value.split(",")
+    else:
+        try:
+            values = list(value)
+        except TypeError:
+            values = [value]
+    numeric = pd.to_numeric(pd.Series(values), errors="coerce").dropna()
+    return float(numeric.max()) if not numeric.empty else np.nan
+
+
+def prepare_network_plot(
+    data: NetworkData,
+) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, dict[str, str]]:
+    """Prepare discrete voltage/current branches and station/junction buses."""
+
+    branches = data.branch.copy()
+    branches["_voltage_kv"] = branches["voltage_kv"].map(_single_voltage)
+    branches["_current_type"] = (
+        branches.get("current_type", pd.Series("AC", index=branches.index))
+        .astype("string").str.upper().fillna("AC")
+    )
+    branches["_style"] = branches.apply(
+        lambda row: (
+            f"{row['_voltage_kv']:g} kV {row['_current_type']}"
+            if np.isfinite(row["_voltage_kv"])
+            else f"Unknown kV {row['_current_type']}"
+        ),
+        axis=1,
+    )
+    voltages = sorted(branches["_voltage_kv"].dropna().unique())
+    fallback = plt.colormaps["tab20"](np.linspace(0, 1, max(len(voltages), 1)))
+    voltage_colors = {
+        voltage: NETWORK_VOLTAGE_COLORS.get(float(voltage), fallback[index])
+        for index, voltage in enumerate(voltages)
+    }
+    style_colors = {
+        style: voltage_colors.get(float(group["_voltage_kv"].iloc[0]), "#7d8581")
+        for style, group in branches.groupby("_style", observed=True)
+    }
+    buses = data.bus.loc[
+        data.bus["subclass"].isin(["junction_bus", "station_bus"])
+    ].copy()
+    buses["_node_type"] = buses["subclass"].map({
+        "junction_bus": "junction", "station_bus": "station",
+    })
+    return branches, buses, style_colors
 
 
 def draw_background(
@@ -430,47 +608,24 @@ def timeseries_class_maps(
 ) -> PlotResult:
     """Plot one map per class from a time-by-location dataset."""
 
-    classes = (
-        [str(class_name)]
-        if class_name
-        else data["class"].values.astype(str).tolist()
+    prepared = prepare_timeseries_plot(
+        data, variable=variable, year=year, class_name=class_name,
+        quantity=quantity,
     )
-    unknown = set(classes).difference(data["class"].values.astype(str))
-    if unknown:
-        raise KeyError(f"Unknown class values: {sorted(unknown)}")
-    geometry = _xarray_geometry(data)
     figures = {}
-    for item in classes:
-        values = data[variable].sel(time=str(year), **{"class": item})
-        if values.sizes.get("time", 0) == 0:
-            raise ValueError(f"No {year} data are available for class={item!r}.")
-        if quantity == "load":
-            display = values.sum("time").compute().values / 1e6
-            label = f"Annual {item} demand (TWh)"
-            title = f"{item}: annual electricity demand, {year}"
-            limits = (None, None)
-        else:
-            display = values.mean("time").compute().values
-            label = f"Annual mean {item} capacity factor (p.u.)"
-            title = f"{item}: annual mean capacity factor, {year}"
-            limits = (0.0, 1.0)
-        frame = gpd.GeoDataFrame(
-            {"_value": display},
-            geometry=geometry,
-            crs=data.attrs["crs"],
-        )
+    for item, (frame, metadata) in prepared.items():
         figures[item] = continuous_map(
             frame,
             "_value",
             spatial=spatial,
-            title=title,
-            label=label,
+            title=str(metadata["title"]),
+            label=str(metadata["label"]),
             map_crs=map_crs,
             china_inset=china_inset,
-            vmin=limits[0],
-            vmax=limits[1],
+            vmin=metadata["vmin"],
+            vmax=metadata["vmax"],
         )
-    return figures[classes[0]] if class_name else figures
+    return figures[str(class_name)] if class_name else figures
 
 
 def _xarray_geometry(data: xr.Dataset) -> gpd.GeoSeries:
@@ -543,68 +698,54 @@ def plot_network(
     china_inset: bool | None = None,
     **_: object,
 ) -> Figure:
-    """Plot standardized buses, branches, transformers, and converters."""
+    """Plot standardized branches and junction/station buses."""
 
     figure, axes = map_axes(spatial, china_inset=china_inset)
-    branches = data.branch.to_crs(map_crs)
-    bus_layers = {}
-    for bus_subclass, color, size, marker, order in (
-        ("junction_bus", "#596267", 0.1, "o", 3),
-        ("station_bus", "#d1495b", 0.45, "o", 5),
-    ):
-        bus_layer = data.bus.loc[
-            data.bus["subclass"].eq(bus_subclass)
-        ].to_crs(map_crs)
-        bus_layer["geometry"] = bus_layer.geometry.representative_point()
-        bus_layers[bus_subclass] = (bus_layer, color, size, marker, order)
-    equipment_layers = (
-        (data.transformer.to_crs(map_crs), "#c47a2c", "D", 5),
-        (data.converter.to_crs(map_crs), "#7a5195", "s", 6),
-    )
+    branches, buses, style_colors = prepare_network_plot(data)
+    branches = branches.to_crs(map_crs)
+    buses = buses.to_crs(map_crs)
+    buses["geometry"] = buses.geometry.representative_point()
+    bus_styles = {
+        "junction": ("#596267", 0.12, 3),
+        "station": ("#d1495b", 0.5, 5),
+    }
     for index, axis in enumerate(axes):
         draw_background(axis, spatial, map_crs=map_crs, zorder=0)
-        branches.plot(
-            ax=axis,
-            color="#4e79a7",
-            linewidth=0.3,
-            alpha=0.62,
-            zorder=2,
-        )
-        for bus_layer, color, size, marker, order in bus_layers.values():
-            bus_layer.plot(
+        for style, layer in branches.groupby("_style", observed=True):
+            layer.plot(
                 ax=axis,
-                color=color,
-                markersize=size,
-                marker=marker,
-                alpha=0.58,
-                zorder=order,
+                color=style_colors[str(style)], linewidth=0.34,
+                linestyle="--" if str(style).endswith(" DC") else "-",
+                alpha=0.7, zorder=2,
             )
-        for equipment, color, marker, order in equipment_layers:
-            if not equipment.empty:
-                equipment.assign(
-                    geometry=equipment.geometry.representative_point()
-                ).plot(ax=axis, color=color, markersize=0.35, marker=marker,
-                       alpha=0.65, zorder=order)
+        for node_type, (color, size, order) in bus_styles.items():
+            layer = buses.loc[buses["_node_type"].eq(node_type)]
+            if not layer.empty:
+                layer.plot(
+                    ax=axis, color=color, markersize=size, marker="o",
+                    alpha=0.62, zorder=order,
+                )
         if index == 0:
+            branch_handles = [
+                Line2D(
+                    [0], [0], color=style_colors[str(style)],
+                    linestyle="--" if str(style).endswith(" DC") else "-",
+                    linewidth=1.2, label=str(style),
+                )
+                for style in sorted(style_colors, key=network_style_sort_key)
+            ]
             axis.legend(
-                handles=[
-                    Line2D([0], [0], color="#4e79a7", label="Branches"),
+                handles=[*branch_handles,
                     Line2D([0], [0], marker="o", linestyle="none",
                            color="#596267", markersize=4,
-                           label="Junction buses"),
-                    Line2D([0], [0], marker="D", linestyle="none",
-                           color="#c47a2c", markersize=4,
-                           label="Transformers"),
-                    Line2D([0], [0], marker="s", linestyle="none",
-                           color="#7a5195", markersize=4,
-                           label="Converters"),
+                           label="Junction"),
                     Line2D([0], [0], marker="o", linestyle="none",
                            color="#d1495b", markersize=5,
-                           label="Station buses"),
+                           label="Station"),
                 ],
                 loc="lower left",
                 bbox_to_anchor=(0.095, 0.015),
-                frameon=False,
+                ncol=2, frameon=False, fontsize=7,
             )
         finish_map(
             axis,
@@ -617,6 +758,15 @@ def plot_network(
     return figure
 
 
+def network_style_sort_key(style: object) -> tuple[float, str]:
+    text = str(style)
+    try:
+        voltage = float(text.split(" ", 1)[0])
+    except ValueError:
+        voltage = np.inf
+    return voltage, text
+
+
 def asset_point_map(
     data: gpd.GeoDataFrame,
     capacity_column: str,
@@ -627,17 +777,9 @@ def asset_point_map(
 ) -> Figure:
     """Plot point assets with class-specific colors and markers."""
 
-    capacity = pd.to_numeric(data[capacity_column], errors="coerce")
-    frame = data.loc[data.geometry.notna() & capacity.gt(0)].copy()
-    frame["_class"] = frame["class"].astype("string").fillna("other")
-    frame["_capacity"] = capacity.loc[frame.index]
-    reference = max(float(frame["_capacity"].quantile(0.99)), 1.0)
-    frame["_marker_size"] = 2 + 24 * np.sqrt(
-        (frame["_capacity"] / reference).clip(0, 1)
-    )
+    frame, reference, classes = prepare_asset_points(data, capacity_column)
     frame = frame.to_crs(map_crs)
     figure, axes = map_axes(spatial, china_inset=china_inset)
-    classes = frame["_class"].value_counts().index.astype(str)
     fallback = plt.colormaps["tab10"](np.linspace(0, 1, len(classes)))
     handles = []
     for class_index, item in enumerate(classes):
@@ -645,7 +787,7 @@ def asset_point_map(
         marker = CATEGORY_MARKERS.get(item, "o")
         handles.append(Line2D(
             [0], [0], marker=marker, linestyle="none", markerfacecolor=color,
-            markeredgecolor="white", markersize=7, label=item,
+            markeredgecolor="white", markersize=7, label=class_label(item),
         ))
     for axis_index, axis in enumerate(axes):
         draw_background(axis, spatial, map_crs=map_crs, zorder=0)
@@ -710,17 +852,13 @@ def plot_population(
     china_inset: bool | None = None,
     **_: object,
 ) -> Figure:
-    frame = data.copy()
-    frame["_population"] = np.log10(
-        pd.to_numeric(frame["population"], errors="coerce").fillna(0).clip(lower=0)
-        + 1
-    )
+    frame = prepare_population_plot(data)
     return continuous_map(
         frame,
-        "_population",
+        "_value",
         spatial=spatial,
         title="Population by standardized source cell",
-        label="log10(population + 1)",
+        label="log10(人口 + 1)",
         map_crs=map_crs,
         china_inset=china_inset,
     )

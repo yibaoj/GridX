@@ -35,38 +35,23 @@ def plot_dispatch(
 ) -> Figure:
     """Plot load, class dispatch, storage charging, and load shedding."""
 
-    snapshots = result.snapshots
-    start = snapshots.min() if start is None else pd.Timestamp(start)
-    end = snapshots.max() if end is None else pd.Timestamp(end)
-    snapshots = snapshots[(snapshots >= start) & (snapshots <= end)]
-    buses = _selected_buses(result, admin_uids, spatial_uids)
-    network = result.network
-    generator = network.generators.loc[
-        network.generators["bus"].astype(str).isin(buses)
-    ]
-    dispatch = network.generators_t.p.reindex(
-        index=snapshots, columns=generator.index
-    ).fillna(0)
-    classes = generator["carrier"].map(_base_class)
-    production = dispatch.T.groupby(classes).sum().T
-    storage = network.storage_units.loc[
-        network.storage_units["bus"].astype(str).isin(buses)
-    ]
-    storage_power = network.storage_units_t.p.reindex(
-        index=snapshots, columns=storage.index
-    ).fillna(0)
-    storage_classes = storage["carrier"].map(
-        lambda value: f"{_base_class(value)} discharge"
+    prepared = prepare_dispatch_data(
+        result,
+        start=start,
+        end=end,
+        admin_uids=admin_uids,
+        spatial_uids=spatial_uids,
     )
-    discharge = storage_power.clip(lower=0).T.groupby(storage_classes).sum().T
-    charging = -storage_power.clip(upper=0).T.groupby(storage_classes).sum().T
+    snapshots = prepared["snapshots"]
+    production = prepared["generation"]
+    discharge = prepared["storage_discharge"].rename(
+        columns=lambda value: f"{value} discharge"
+    )
+    charging = -prepared["storage_charge"]
     positive = pd.concat([production, discharge], axis=1)
     positive = positive.T.groupby(level=0).sum().T
     positive = positive.loc[:, positive.sum().gt(0)]
-    loads = network.loads.loc[network.loads["bus"].astype(str).isin(buses)]
-    load = network.loads_t.p_set.reindex(
-        index=snapshots, columns=loads.index
-    ).fillna(0).sum(axis=1)
+    load = prepared["load"]
 
     figure, axis = plt.subplots(figsize=figsize)
     colors = [_color(name, index) for index, name in enumerate(positive.columns)]
@@ -118,6 +103,58 @@ def plot_dispatch(
     )
     figure.tight_layout()
     return figure
+
+
+def prepare_dispatch_data(
+    result: UnitCommitmentResult,
+    *,
+    start: object = None,
+    end: object = None,
+    admin_uids: str | Iterable[str] | None = None,
+    spatial_uids: str | Iterable[str] | None = None,
+) -> dict[str, object]:
+    """Prepare the class-level series shared by static and web plots."""
+
+    snapshots = result.snapshots
+    start = snapshots.min() if start is None else pd.Timestamp(start)
+    end = snapshots.max() if end is None else pd.Timestamp(end)
+    snapshots = snapshots[(snapshots >= start) & (snapshots <= end)]
+    buses = _selected_buses(result, admin_uids, spatial_uids)
+    data = result.data.sel(time=snapshots)
+
+    generator_bus = data["generator_bus"].to_series()
+    generator = generator_bus.index[generator_bus.isin(buses)]
+    dispatch = data["generator_p_mw"].sel(
+        generator_uid=generator
+    ).to_pandas().fillna(0)
+    generator_class = data["generator_carrier"].sel(
+        generator_uid=generator
+    ).to_series().map(_base_class)
+    generation = dispatch.T.groupby(generator_class).sum().T
+
+    storage_bus = data["storage_bus"].to_series()
+    storage = storage_bus.index[storage_bus.isin(buses)]
+    storage_power = data["storage_p_mw"].sel(
+        storage_uid=storage
+    ).to_pandas().fillna(0)
+    storage_class = data["storage_carrier"].sel(
+        storage_uid=storage
+    ).to_series().map(_base_class)
+    storage_discharge = storage_power.clip(lower=0).T.groupby(storage_class).sum().T
+    storage_charge = storage_power.clip(upper=0).T.groupby(storage_class).sum().T
+
+    load_bus = data["load_bus"].to_series()
+    load_uid = load_bus.index[load_bus.isin(buses)]
+    load = data["load_p_set_mw"].sel(
+        load_uid=load_uid
+    ).to_pandas().fillna(0).sum(axis=1)
+    return {
+        "snapshots": snapshots,
+        "generation": generation,
+        "storage_discharge": storage_discharge,
+        "storage_charge": storage_charge,
+        "load": load,
+    }
 
 
 def _selected_buses(

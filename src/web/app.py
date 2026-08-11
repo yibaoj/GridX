@@ -50,6 +50,16 @@ class WebApplication:
                 self.end_headers()
                 self.wfile.write(body)
 
+            def _prebuilt(self, path: Path) -> None:
+                body = path.read_bytes()
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Cache-Control", "public, max-age=3600")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
             def log_message(self, format: str, *args: object) -> None:
                 print(f"web: {format % args}")
 
@@ -60,11 +70,19 @@ class WebApplication:
         if path == "/api/bootstrap":
             request._json(self.data.bootstrap())
             return
-        if path == "/api/boundary":
-            request._json(self.data.boundary())
+        if path.startswith("/api/boundary/"):
+            request._prebuilt(self.data.boundary_path(
+                path.removeprefix("/api/boundary/")
+            ))
             return
         if path.startswith("/api/layers/"):
-            request._json(self.data.layer(path.removeprefix("/api/layers/")))
+            parts = path.removeprefix("/api/layers/").split("/")
+            if len(parts) not in {2, 3}:
+                raise KeyError("Layer route requires stage and layer IDs.")
+            request._prebuilt(self.data.layer_path(*parts))
+            return
+        if path == "/api/application/uc":
+            request._prebuilt(self.data.application_path())
             return
         self._static(request, path)
 

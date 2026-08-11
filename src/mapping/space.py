@@ -60,6 +60,7 @@ def map_timeseries_to_cells(
     metric_crs: str,
     auxiliary_cells: gpd.GeoDataFrame | None = None,
     auxiliary_value: str | None = None,
+    uncovered_auxiliary_nearest_levels: list[str] | None = None,
     source_cell_width_degrees: float | None = None,
     source_cell_height_degrees: float | None = None,
     conservation_tolerance: float = 0.005,
@@ -72,6 +73,16 @@ def map_timeseries_to_cells(
         height_degrees=source_cell_height_degrees,
     )
     crosswalk = _area_crosswalk(source, cells, metric_crs=metric_crs)
+    if quantity_kind == "extensive" and method == "auxiliary":
+        crosswalk = _attach_uncovered_auxiliary_cells(
+            crosswalk,
+            source,
+            cells,
+            auxiliary_cells=auxiliary_cells,
+            auxiliary_value=auxiliary_value,
+            levels=uncovered_auxiliary_nearest_levels or [],
+            metric_crs=metric_crs,
+        )
     target_uids = cells["spatial_uid"].astype(str).to_numpy()
     weights = _weights(
         crosswalk,
@@ -120,11 +131,20 @@ def map_timeseries_to_cells(
         dims="uid",
         coords={"uid": result["uid"]},
     )
-    result[variable] = (
-        result[variable].where(covered, 0.0)
-        if quantity_kind == "extensive"
-        else result[variable].where(covered)
-    )
+    if quantity_kind == "extensive" and method != "linear":
+        auxiliary = auxiliary_cells.set_index("spatial_uid")[auxiliary_value]
+        target_auxiliary = cells["spatial_uid"].map(auxiliary)
+        if target_auxiliary.isna().any():
+            raise ValueError("Auxiliary values are missing for some target cells.")
+        zero_auxiliary = xr.DataArray(
+            target_auxiliary.le(0).to_numpy(),
+            dims="uid",
+            coords={"uid": result["uid"]},
+        )
+        result[variable] = result[variable].where(covered | zero_auxiliary)
+        result[variable] = result[variable].where(~zero_auxiliary, 0.0)
+    else:
+        result[variable] = result[variable].where(covered)
     return result
 
 
@@ -196,6 +216,53 @@ def _area_crosswalk(
     return pd.DataFrame(overlap.drop(columns="geometry"))
 
 
+def _attach_uncovered_auxiliary_cells(
+    crosswalk: pd.DataFrame,
+    source: gpd.GeoDataFrame,
+    cells: gpd.GeoDataFrame,
+    *,
+    auxiliary_cells: gpd.GeoDataFrame | None,
+    auxiliary_value: str | None,
+    levels: list[str],
+    metric_crs: str,
+) -> pd.DataFrame:
+    """Attach selected positive-weight cells to their nearest source region."""
+
+    if not levels:
+        return crosswalk
+    if auxiliary_cells is None or auxiliary_value is None:
+        raise ValueError("Nearest auxiliary fallback requires auxiliary cell values.")
+    auxiliary = auxiliary_cells.set_index("spatial_uid")[auxiliary_value]
+    uncovered = cells.loc[
+        cells["spatial_level"].isin(levels)
+        & ~cells["spatial_uid"].isin(crosswalk["spatial_uid"])
+        & cells["spatial_uid"].map(auxiliary).fillna(0).gt(0),
+        ["spatial_uid", "geometry"],
+    ].to_crs(metric_crs)
+    if uncovered.empty:
+        return crosswalk
+    sources = source[["uid", "geometry"]].rename(
+        columns={"uid": "source_uid"}
+    ).to_crs(metric_crs)
+    nearest = gpd.sjoin_nearest(
+        uncovered,
+        sources,
+        how="left",
+        distance_col="distance_m",
+    ).sort_values(["spatial_uid", "distance_m", "source_uid"]).drop_duplicates(
+        "spatial_uid"
+    )
+    nearest["target_area_m2"] = nearest.geometry.area
+    nearest["overlap_area_m2"] = nearest["target_area_m2"]
+    source_area = sources.set_index("source_uid").geometry.area
+    nearest["source_area_m2"] = nearest["source_uid"].map(source_area)
+    added = nearest[[
+        "source_uid", "source_area_m2", "spatial_uid",
+        "target_area_m2", "overlap_area_m2",
+    ]]
+    return pd.concat([crosswalk, added], ignore_index=True)
+
+
 def _weights(
     crosswalk: pd.DataFrame,
     *,
@@ -218,8 +285,11 @@ def _weights(
         if auxiliary_cells is None or auxiliary_value is None:
             raise ValueError("Auxiliary downscaling requires mapped auxiliary data.")
         auxiliary = auxiliary_cells.set_index("spatial_uid")[auxiliary_value]
+        mapped_auxiliary = crosswalk["spatial_uid"].map(auxiliary)
+        if mapped_auxiliary.isna().any():
+            raise ValueError("Auxiliary values are missing for intersecting target cells.")
         raw = (
-            crosswalk["spatial_uid"].map(auxiliary).fillna(0).to_numpy()
+            mapped_auxiliary.to_numpy()
             * crosswalk["overlap_area_m2"].to_numpy()
             / crosswalk["target_area_m2"].to_numpy()
         )

@@ -12,6 +12,12 @@ levels = ["province", "marine_zone"]
 size_km = 50.0
 polygon_file = ""
 level_priority = ["province", "marine_zone"]
+# The current load source covers mainland China's 31 provincial regions.
+exclude_admin_uids = [
+  "province_boundaries:710000",
+  "province_boundaries:810000",
+  "province_boundaries:820000",
+]
 same_level_overlap_tolerance_km2 = 1.0
 minimum_area_km2 = 5.0
 
@@ -21,6 +27,9 @@ minimum_area_km2 = 5.0
 method = "auxiliary"
 auxiliary_dataset = "population"
 auxiliary_value = "population"
+# Positive auxiliary cells outside a load polygon, such as clipped nearshore
+# cells, join the nearest source polygon before source-wise normalization.
+uncovered_auxiliary_nearest_levels = ["marine_zone"]
 # Optional quality gate: require the raw auxiliary support to be finer than
 # the standard cells before aggregation. It does not determine scale direction.
 auxiliary_must_be_finer = true
