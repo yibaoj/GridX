@@ -49,7 +49,8 @@ Responsibilities:
 - Produce canonical entity tables and multidimensional time-series arrays.
 - Validate uniqueness, units, geometry, ranges, and referential integrity.
 
-Each dataset has a focused processor module (`network.py`, `generator.py`,
+Each dataset has a focused processor module (`network.py` plus its compact
+`network_model.py` helper, `generator.py`,
 `storage.py`, `parameter.py`, `load.py`, `population.py`, and `resource.py`).
 `manager.py` is the public orchestration interface, while `schema.py` owns the
 shared contract.
@@ -98,6 +99,8 @@ Responsibilities:
 - Harmonize time zones, interval conventions, calendars, and model snapshots.
 - Aggregate or disaggregate data without changing canonical source tables.
 - Record mapping method, distance, confidence, and review flags.
+- Carry the standardized parameter table forward unchanged, so a mapped-data
+  snapshot is the case layer's only upstream dependency.
 
 Spatial units are an indexing and aggregation interface, not an electrical
 connectivity rule. Sharing one cell does not prove electrical connectivity;

@@ -84,7 +84,7 @@ class SourceDownloader:
         partial.unlink(missing_ok=True)
         request = Request(
             url,
-            headers={"User-Agent": "Power-System-Operations/1.0"},
+            headers={"User-Agent": "GridX/1.0"},
         )
         try:
             with urlopen(request) as response, partial.open("wb") as file:
@@ -115,7 +115,7 @@ class SourceDownloader:
     def _figshare_url(source: pd.Series) -> str:
         request = Request(
             source["api_url"],
-            headers={"User-Agent": "Power-System-Operations/1.0"},
+            headers={"User-Agent": "GridX/1.0"},
         )
         with urlopen(request) as response:
             metadata = json.load(response)

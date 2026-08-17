@@ -6,7 +6,6 @@ import argparse
 import gzip
 import json
 from pathlib import Path
-import shutil
 import tomllib
 from typing import Any
 import warnings
@@ -23,7 +22,7 @@ from ..case import PowerSystemCaseManager
 from ..case.plot import load_with_bus_geometry
 from ..mapping import SpatiotemporalMappingManager
 from ..mapping.plot import prepare_asset_pies
-from ..standard import NetworkData, StandardDataManager
+from ..standard import StandardNetwork, StandardDataManager
 from ..standard.plot import (
     CATEGORY_COLORS,
     capacity_legend_values,
@@ -60,7 +59,6 @@ class WebDataBuilder:
         self.case = PowerSystemCaseManager(
             self.project_root / options["case_config"],
             mapped_data=self.mapping,
-            standard_data=self.standard,
         )
         self.uc_config = self.project_root / options["uc_config"]
         self._case_cache = None
@@ -69,9 +67,10 @@ class WebDataBuilder:
         """Build boundaries, map layers, and saved application series."""
 
         self.output_root.mkdir(parents=True, exist_ok=True)
+        self._remove_legacy_duplicates()
         boundary = self._boundary()
+        self._write("boundary/common.json.gz", boundary)
         for stage in ("standard", "mapping", "case"):
-            self._write(f"boundary/{stage}.json.gz", boundary)
             self._build_stage(stage)
         self._write("application/uc.json.gz", self._application())
         manifest = {
@@ -82,6 +81,18 @@ class WebDataBuilder:
         }
         self._write("manifest.json.gz", manifest)
         return manifest
+
+    def _remove_legacy_duplicates(self) -> None:
+        """Remove payloads superseded by shared-path aliases."""
+
+        for stage in ("standard", "mapping", "case"):
+            (self.output_root / f"boundary/{stage}.json.gz").unlink(
+                missing_ok=True
+            )
+        for item in self._resource_classes():
+            (self.output_root / f"layers/case/resource/{item['id']}.json.gz").unlink(
+                missing_ok=True
+            )
 
     def _build_stage(self, stage: str) -> None:
         for dataset_id in ("generator", "storage"):
@@ -97,12 +108,7 @@ class WebDataBuilder:
         for class_name in resource_classes:
             relative = f"layers/{stage}/resource/{class_name}.json.gz"
             if stage == "case":
-                target = self.output_root / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(
-                    self.output_root / f"layers/mapping/resource/{class_name}.json.gz",
-                    target,
-                )
+                continue
             else:
                 self._write(
                     relative,
@@ -228,7 +234,7 @@ class WebDataBuilder:
 
     def _network(self, stage: str) -> dict[str, Any]:
         source = self._dataset(stage, "network")
-        network = NetworkData(
+        network = StandardNetwork(
             source.bus.data if hasattr(source.bus, "data") else source.bus,
             source.branch.data if hasattr(source.branch, "data") else source.branch,
             source.transformer.data if hasattr(source.transformer, "data") else source.transformer,

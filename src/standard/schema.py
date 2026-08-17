@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
 from pathlib import Path
 import re
 
@@ -14,7 +13,6 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import xarray as xr
 from shapely.geometry import Point
-
 
 DATASET_IDS = (
     "spatial",
@@ -31,7 +29,6 @@ __all__ = [
     "DATASET_IDS",
     "REQUIRED_ATTRIBUTES",
     "REQUIRED_COLUMNS",
-    "NetworkData",
     "time_bounds",
 ]
 
@@ -248,26 +245,19 @@ _BOOLEAN_FIELDS = {
 }
 
 
-@dataclass(frozen=True)
-class NetworkData:
-    """Canonical electrical network represented by four component tables."""
-
-    bus: gpd.GeoDataFrame
-    branch: gpd.GeoDataFrame
-    transformer: gpd.GeoDataFrame
-    converter: gpd.GeoDataFrame
-
-    @property
-    def schema(self) -> "_SchemaAccessor":
-        """Return the schema accessor for all electrical component tables."""
-
-        return _SchemaAccessor(self)
-
-
 def _dataset_schema(data: object) -> pd.DataFrame:
     """Describe the structure of one materialized standard dataset."""
 
-    if isinstance(data, NetworkData):
+    from .model import StandardData, StandardNetwork
+
+    if isinstance(data, StandardData):
+        tables = []
+        for dataset_id in DATASET_IDS:
+            table = _dataset_schema(getattr(data, dataset_id))
+            table.insert(0, "dataset_id", dataset_id)
+            tables.append(table)
+        return pd.concat(tables, ignore_index=True)
+    if isinstance(data, StandardNetwork):
         rows = [
             *_frame_schema_rows(data.bus, "bus", "network.bus"),
             *_frame_schema_rows(data.branch, "branch", "network.branch"),
@@ -285,7 +275,7 @@ def _dataset_schema(data: object) -> pd.DataFrame:
     else:
         raise TypeError(
             "Schema inspection supports pandas/GeoPandas DataFrames, "
-            "xarray Datasets, and NetworkData."
+            "xarray Datasets, StandardNetwork, and StandardData."
         )
 
     result = pd.DataFrame(rows, columns=_SCHEMA_COLUMNS)
@@ -692,8 +682,10 @@ def _validate_xarray(data: xr.Dataset, dataset_id: str) -> None:
 
 def _validate_dataset(data: object, dataset_id: str) -> None:
     if dataset_id == "network":
-        if not isinstance(data, NetworkData):
-            raise TypeError("network must be represented by NetworkData.")
+        from .model import StandardNetwork
+
+        if not isinstance(data, StandardNetwork):
+            raise TypeError("network must be represented by StandardNetwork.")
         _validate_frame(data.bus, "network.bus")
         _validate_frame(data.branch, "network.branch")
         _validate_frame(data.transformer, "network.transformer")

@@ -6,10 +6,10 @@ import pandas as pd
 
 from ..mapping import MappedNetwork
 from ..mapping.network import largest_connected_network
-from ..standard import NetworkData
+from ..standard import StandardNetwork
 
 
-def filter_network(network: MappedNetwork, options: dict) -> tuple[NetworkData, pd.DataFrame]:
+def filter_network(network: MappedNetwork, options: dict) -> tuple[StandardNetwork, pd.DataFrame]:
     """Filter network components and retain their largest connected graph."""
 
     minimum = float(options["minimum_voltage_kv"])
@@ -36,7 +36,7 @@ def filter_network(network: MappedNetwork, options: dict) -> tuple[NetworkData, 
     transformer = connected(network.transformer, "transformer_statuses")
     converter = connected(network.converter, "converter_statuses")
     result = largest_connected_network(
-        NetworkData(bus, branch, transformer, converter)
+        StandardNetwork(bus, branch, transformer, converter)
     )
     retained = set(result.branch["uid"])
     branch_mapping = network.branch_mapping.loc[

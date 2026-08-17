@@ -34,13 +34,14 @@ def save_case(case: PowerSystemCase, root: Path) -> None:
 def load_case(root: Path, config: dict) -> PowerSystemCase:
     """Load a complete case previously written by :func:`save_case`."""
 
+    spatial = gpd.read_parquet(root / "spatial.parquet")
     return PowerSystemCase(
         network=_read_network(root / "network"),
         generator=_read_component(root / "generator"),
         storage=_read_component(root / "storage"),
         load=xr.open_dataset(root / "load.nc", chunks="auto"),
-        spatial=gpd.read_parquet(root / "spatial.parquet"),
-        resource=xr.open_dataset(root / "resource.nc", chunks="auto"),
+        spatial=spatial,
+        resource=_read_spatial_timeseries(root / "resource.nc", spatial),
         population=gpd.read_parquet(root / "population.parquet"),
         validation=pd.read_parquet(root / "validation.parquet"),
         config=config,
@@ -57,6 +58,9 @@ def load_case_dataset(root: Path, dataset_id: str, config: dict) -> object:
     if dataset_id in {"generator", "storage"}:
         return _read_component(root / dataset_id)
     if dataset_id in {"load", "resource"}:
+        if dataset_id == "resource":
+            spatial = gpd.read_parquet(root / "spatial.parquet")
+            return _read_spatial_timeseries(root / "resource.nc", spatial)
         return xr.open_dataset(root / f"{dataset_id}.nc", chunks="auto")
     return gpd.read_parquet(root / f"{dataset_id}.parquet")
 
@@ -136,3 +140,21 @@ def _write_xarray(data: xr.Dataset, path: Path, variable: str) -> None:
         encoding={variable: {"zlib": True, "complevel": 4}},
     )
     temporary.replace(path)
+
+
+def _read_spatial_timeseries(
+    path: Path,
+    spatial: gpd.GeoDataFrame,
+) -> xr.Dataset:
+    """Open a cell time series without NetCDF fixed-width WKT expansion."""
+
+    data = xr.open_dataset(path, chunks="auto", drop_variables=["geometry"])
+    lookup = spatial.set_index("spatial_uid").geometry.to_wkt()
+    spatial_uids = data["spatial_uid"].values.astype(str)
+    geometry = lookup.reindex(spatial_uids)
+    if geometry.isna().any():
+        data.close()
+        raise ValueError("Resource contains spatial_uid values absent from spatial.")
+    return data.assign_coords(
+        geometry=("uid", geometry.to_numpy(dtype=object))
+    )

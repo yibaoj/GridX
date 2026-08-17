@@ -32,8 +32,40 @@ from ..standard.plot import (
     timeseries_class_maps,
     network_style_sort_key,
 )
-from ..standard.schema import NetworkData
+from ..standard import StandardNetwork
 from .model import MappedNetwork
+
+
+def filter_plot_levels(data: object, levels: set[str]) -> object:
+    """Filter one mapped object for display without changing stored outputs."""
+
+    if isinstance(data, gpd.GeoDataFrame):
+        if "spatial_level" not in data:
+            return data
+        return data.loc[data["spatial_level"].astype(str).isin(levels)].copy()
+    if isinstance(data, xr.Dataset):
+        if "spatial_level" not in data.coords:
+            return data
+        mask = np.isin(data["spatial_level"].values.astype(str), list(levels))
+        return data.isel(uid=np.flatnonzero(mask))
+    if isinstance(data, MappedNetwork):
+        bus = data.bus.loc[
+            data.bus["spatial_level"].astype(str).isin(levels)
+        ].copy()
+        branch_mapping = data.branch_mapping.loc[
+            data.branch_mapping["spatial_level"].astype(str).isin(levels)
+        ].copy()
+        branch_uids = set(branch_mapping["branch_uid"].astype(str))
+        branch = data.branch.loc[
+            data.branch["uid"].astype(str).isin(branch_uids)
+        ].copy()
+        bus_uids = set(bus["uid"].astype(str))
+        equipment = [frame.loc[
+            frame["from_bus_uid"].astype(str).isin(bus_uids)
+            & frame["to_bus_uid"].astype(str).isin(bus_uids)
+        ].copy() for frame in (data.transformer, data.converter)]
+        return MappedNetwork(bus, branch, *equipment, branch_mapping)
+    return data
 
 
 def plot_spatial(
@@ -288,7 +320,7 @@ def plot_network(
     """Plot the retained connected branches and junction/station buses."""
 
     figure, axes = map_axes(spatial, china_inset=china_inset)
-    network = NetworkData(
+    network = StandardNetwork(
         data.bus, data.branch, data.transformer, data.converter
     )
     branches, buses, style_colors = prepare_network_plot(network)

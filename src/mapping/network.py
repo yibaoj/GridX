@@ -10,10 +10,10 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from ..standard import NetworkData
+from ..standard import StandardNetwork
 
 
-def largest_connected_network(network: NetworkData) -> NetworkData:
+def largest_connected_network(network: StandardNetwork) -> StandardNetwork:
     """Return the largest subgraph connected by all electrical components."""
 
     bus_uids = set(network.bus["uid"].dropna())
@@ -47,7 +47,7 @@ def largest_connected_network(network: NetworkData) -> NetworkData:
     )):
         frame["in_largest_connected_graph"] = True
         frame.attrs = source.attrs.copy()
-    result = NetworkData(
+    result = StandardNetwork(
         bus.reset_index(drop=True),
         retained["branch"].reset_index(drop=True),
         retained["transformer"].reset_index(drop=True),

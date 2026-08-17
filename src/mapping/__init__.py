@@ -1,11 +1,10 @@
 """Spatiotemporal mapping interfaces."""
 
 from .manager import SpatiotemporalMappingManager
-from .model import MAPPING_IDS, MappedNetwork, MappingData
+from .model import MappedData, MappedNetwork
 
 __all__ = [
-    "MappingData",
-    "MAPPING_IDS",
+    "MappedData",
     "MappedNetwork",
     "SpatiotemporalMappingManager",
 ]

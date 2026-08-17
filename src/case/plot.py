@@ -47,7 +47,7 @@ def plot_case(
         raise KeyError(
             f"Unknown case component {component!r}; expected {CASE_COMPONENTS}."
         )
-    background = spatial if spatial is not None else _background(case.spatial)
+    background = spatial if spatial is not None else spatial_background(case.spatial)
     if spatial_levels is not None:
         background = filter_spatial_levels(background, spatial_levels)
     cells = case.spatial
@@ -105,7 +105,7 @@ def plot_case(
             )
 
 
-def _background(cells: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+def spatial_background(cells: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """Recover an administrative display boundary from case cells."""
 
     frame = cells[["admin_uid", "spatial_level", "geometry"]].dissolve(

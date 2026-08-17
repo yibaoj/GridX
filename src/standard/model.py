@@ -1,39 +1,37 @@
-"""Public mapping-layer result objects."""
+"""Public standard-layer data objects."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 import geopandas as gpd
-import pandas as pd
 import xarray as xr
 
-from ..standard import ParameterData
+from .parameter import ParameterData
 
 
 @dataclass(frozen=True)
-class MappedNetwork:
-    """Largest connected network and its spatial-cell relationships."""
+class StandardNetwork:
+    """Canonical electrical network represented by four component tables."""
 
     bus: gpd.GeoDataFrame
     branch: gpd.GeoDataFrame
     transformer: gpd.GeoDataFrame
     converter: gpd.GeoDataFrame
-    branch_mapping: pd.DataFrame
 
     @property
     def schema(self) -> object:
-        from .schema import SchemaAccessor
+        from .schema import _SchemaAccessor
 
-        return SchemaAccessor(self)
+        return _SchemaAccessor(self)
 
 
 @dataclass(frozen=True)
-class MappedData:
-    """Materialized crosswalks and mapped datasets for case construction."""
+class StandardData:
+    """Complete standard-data snapshot with the configuration that built it."""
 
     spatial: gpd.GeoDataFrame
-    network: MappedNetwork
+    network: StandardNetwork
     generator: gpd.GeoDataFrame
     storage: gpd.GeoDataFrame
     parameter: ParameterData
@@ -44,9 +42,9 @@ class MappedData:
 
     @property
     def schema(self) -> object:
-        from .schema import SchemaAccessor
+        from .schema import _SchemaAccessor
 
-        return SchemaAccessor(self)
+        return _SchemaAccessor(self)
 
     def plot(self, dataset_id: str, **kwargs: object) -> object:
         """Plot one contained dataset through the shared plotting facade."""
@@ -61,7 +59,7 @@ class MappedData:
         self.load.close()
         self.resource.close()
 
-    def __enter__(self) -> "MappedData":
+    def __enter__(self) -> "StandardData":
         return self
 
     def __exit__(self, *_: object) -> None:

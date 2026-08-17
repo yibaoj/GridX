@@ -17,7 +17,7 @@ from shapely.geometry import Polygon, box
 import xarray as xr
 
 from .geometry import polygonal_geometry
-from .schema import NetworkData
+from .model import StandardNetwork
 
 
 PlotResult = Figure | dict[str, Figure]
@@ -335,6 +335,41 @@ def prepare_population_plot(data: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     return frame
 
 
+def filter_plot_extent(data: object, spatial: gpd.GeoDataFrame) -> object:
+    """Limit one standard dataset to selected spatial units for plotting."""
+
+    def spatial_union(crs: object) -> object:
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="invalid value encountered in unary_union",
+                category=RuntimeWarning,
+            )
+            return polygonal_geometry(spatial.to_crs(crs).geometry.union_all())
+
+    if isinstance(data, gpd.GeoDataFrame):
+        return data.loc[data.geometry.intersects(spatial_union(data.crs))].copy()
+    if isinstance(data, xr.Dataset):
+        geometry = gpd.GeoSeries.from_wkt(
+            data["geometry"].values, crs=str(data.attrs["crs"])
+        )
+        return data.isel(
+            uid=np.flatnonzero(geometry.intersects(spatial_union(geometry.crs)))
+        )
+    if isinstance(data, StandardNetwork):
+        bus_region = spatial_union(data.bus.crs)
+        branch_region = spatial_union(data.branch.crs)
+        return StandardNetwork(
+            data.bus.loc[data.bus.geometry.intersects(bus_region)].copy(),
+            data.branch.loc[data.branch.geometry.intersects(branch_region)].copy(),
+            data.transformer.loc[
+                data.transformer.geometry.intersects(bus_region)
+            ].copy(),
+            data.converter.loc[data.converter.geometry.intersects(bus_region)].copy(),
+        )
+    return data
+
+
 def prepare_timeseries_plot(
     data: xr.Dataset,
     *,
@@ -416,7 +451,7 @@ def _single_voltage(value: object) -> float:
 
 
 def prepare_network_plot(
-    data: NetworkData,
+    data: StandardNetwork,
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, dict[str, str]]:
     """Prepare discrete voltage/current branches and station/junction buses."""
 
@@ -691,7 +726,7 @@ def plot_spatial(
 
 
 def plot_network(
-    data: NetworkData,
+    data: StandardNetwork,
     *,
     spatial: gpd.GeoDataFrame | None = None,
     map_crs: str = DEFAULT_MAP_CRS,

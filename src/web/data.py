@@ -42,12 +42,12 @@ class WebDataService:
     def boundary(self, stage_id: str) -> dict[str, Any]:
         """Return the prebuilt administrative background for a map stage."""
 
-        return self._read(f"boundary/{stage_id}.json.gz")
+        return self._read("boundary/common.json.gz")
 
     def boundary_path(self, stage_id: str) -> Path:
         """Return the immutable compressed boundary payload path."""
 
-        return self._path(f"boundary/{stage_id}.json.gz")
+        return self._path("boundary/common.json.gz")
 
     def layer(
         self,
@@ -61,7 +61,8 @@ class WebDataService:
         if layer_id == "resource":
             if class_name is None:
                 raise KeyError("Resource layers require a class name.")
-            relative = f"{relative}/{class_name}"
+            source_stage = "mapping" if stage_id == "case" else stage_id
+            relative = f"layers/{source_stage}/{layer_id}/{class_name}"
         return self._read(f"{relative}.json.gz")
 
     def layer_path(
@@ -76,7 +77,8 @@ class WebDataService:
         if layer_id == "resource":
             if class_name is None:
                 raise KeyError("Resource layers require a class name.")
-            relative = f"{relative}/{class_name}"
+            source_stage = "mapping" if stage_id == "case" else stage_id
+            relative = f"layers/{source_stage}/{layer_id}/{class_name}"
         return self._path(f"{relative}.json.gz")
 
     def application(self) -> dict[str, Any]:

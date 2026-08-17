@@ -15,24 +15,22 @@ from shapely.geometry import LineString, Point
 from shapely.strtree import STRtree
 
 from .base import _Standardizer
-from .network_nodes import (
+from .network_model import (
+    build_electrical_network,
+    current_type,
     deduplicate_node_rows,
     fill_missing_node_voltages,
-    station_rows,
-    transformer_rows,
-    validate_nodes,
-    voltage_station_subclass,
-)
-from .network_electrical import build_electrical_network
-from .network_voltage import (
-    current_type,
     line_systems,
     resolve_line_voltages,
+    station_rows,
     tag_numbers,
+    transformer_rows,
+    validate_nodes,
     voltage_label,
+    voltage_station_subclass,
 )
+from .model import StandardNetwork
 from .schema import (
-    NetworkData,
     _finalize_frame,
     _numeric,
     _osm_voltages,
@@ -54,7 +52,7 @@ class _NetworkStandardizer(_Standardizer):
         ("destroyed", "destroyed:power"),
     )
 
-    def build(self) -> NetworkData:
+    def build(self) -> StandardNetwork:
         source_id = self.config["source_ids"][0]
         pbf_path = self.source(source_id)
         feature_output_prefix = (

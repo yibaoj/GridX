@@ -5,10 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 import tomllib
-import warnings
 
 import geopandas as gpd
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -16,6 +14,7 @@ import xarray as xr
 from ..raw import RawDataManager
 from .generator import _GeneratorStandardizer
 from .load import _LoadStandardizer
+from .model import StandardData, StandardNetwork
 from .network import _NetworkStandardizer
 from .parameter import (
     DEFAULT_QUALITY_ORDER,
@@ -23,12 +22,10 @@ from .parameter import (
     as_parameter_data,
 )
 from .population import _PopulationStandardizer
-from .plot import PLOTTERS, PlotResult, filter_spatial_levels
-from .geometry import polygonal_geometry
+from .plot import PlotResult
 from .resource import _ResourceStandardizer
 from .schema import (
     DATASET_IDS,
-    NetworkData,
     _SCHEMA_COLUMNS,
     _dataset_schema,
     _read_dataframe,
@@ -52,6 +49,8 @@ class StandardDataManager:
         "population": _PopulationStandardizer,
         "resource": _ResourceStandardizer,
     }
+    _DEPENDENCIES = {"load": ("spatial",)}
+    _DEPENDENTS = {"spatial": {"load"}}
 
     def __init__(
         self,
@@ -62,12 +61,14 @@ class StandardDataManager:
         config_path = Path(config_path).expanduser().resolve()
         self.project_root = config_path.parent.parent
         with config_path.open("rb") as file:
-            config = tomllib.load(file)
-        self.datasets = config["datasets"]
+            self.config = tomllib.load(file)
+        self.datasets = self.config["datasets"]
         missing = set(DATASET_IDS).difference(self.datasets)
         if missing:
             raise ValueError(f"Standard data config is missing: {sorted(missing)}")
-        self.output_root = self.project_root / config["general"]["output_root"]
+        self.output_root = (
+            self.project_root / self.config["general"]["output_root"]
+        )
         self.raw_data = raw_data or RawDataManager(
             self.project_root / "config/raw_data_sources.csv",
             self.project_root / "data",
@@ -77,48 +78,110 @@ class StandardDataManager:
         self,
         dataset_ids: str | Iterable[str] | None = None,
     ) -> pd.DataFrame:
+        """Report raw-source and materialized-output availability."""
+
+        selected = self._select(dataset_ids)
+        dependency_ids = list(dict.fromkeys(
+            dependency
+            for dataset_id in selected
+            for dependency in self._dependency_closure(dataset_id)
+        ))
+        checked_ids = list(dict.fromkeys([*selected, *dependency_ids]))
+        source_ids_by_dataset = {
+            dataset_id: self._source_ids(dataset_id)
+            for dataset_id in checked_ids
+        }
+        source_ids = list(dict.fromkeys(
+            source_id
+            for values in source_ids_by_dataset.values()
+            for source_id in values
+        ))
+        source_report = self.raw_data.check(source_ids)
+        directly_ready = {
+            dataset_id: bool(
+                source_report.loc[source_ids_by_dataset[dataset_id], "available"].all()
+            )
+            for dataset_id in checked_ids
+        }
+        outputs_available = {
+            dataset_id: all(
+                path.exists() for path in self._output_paths(dataset_id)
+            )
+            for dataset_id in checked_ids
+        }
         rows = []
-        for dataset_id in self._select(dataset_ids):
-            config = self.datasets[dataset_id]
+        for dataset_id in selected:
             source_ids = self._source_ids(dataset_id)
-            source_report = self.raw_data.check(source_ids)
-            outputs = self._output_paths(dataset_id)
+            inputs_available = (
+                directly_ready[dataset_id]
+                and all(
+                    outputs_available[name] or directly_ready[name]
+                    for name in self._dependency_closure(dataset_id)
+                )
+            )
+            available = outputs_available[dataset_id]
             rows.append({
                 "dataset_id": dataset_id,
-                "processor": config["processor"],
                 "source_ids": tuple(source_ids),
-                "sources_available": bool(source_report["exists"].all()),
-                "source_status": "; ".join(
-                    f"{source}:{status}"
-                    for source, status in source_report["status"].items()
+                "inputs_available": inputs_available,
+                "available": available,
+                "status": (
+                    "available"
+                    if available
+                    else "ready_to_build"
+                    if inputs_available
+                    else "input_unavailable"
                 ),
-                "outputs": tuple(str(path) for path in outputs),
-                "output_available": all(path.exists() for path in outputs),
             })
         return pd.DataFrame(rows).set_index("dataset_id")
 
     def build(
         self,
-        dataset_ids: str | Iterable[str],
-    ) -> object:
+        dataset_ids: str | Iterable[str] | None = None,
+        *,
+        overwrite: bool = False,
+    ) -> pd.DataFrame:
+        """Build missing datasets and return their final check report."""
+
         selected = self._select(dataset_ids)
-        results = {}
-        for dataset_id in selected:
-            missing_sources = self.raw_data.check(
-                self._source_ids(dataset_id)
-            ).query("not exists")
-            if not missing_sources.empty:
-                raise FileNotFoundError(
-                    f"{dataset_id} is missing raw sources: "
-                    f"{list(missing_sources.index)}"
-                )
+        initial = self.check(selected)
+        pending = {
+            dataset_id
+            for dataset_id in selected
+            if overwrite or not bool(initial.loc[dataset_id, "available"])
+        }
+        for dataset_id in tuple(pending):
+            pending.update(
+                dependency
+                for dependency in self._dependency_closure(dataset_id)
+                if not self.check(dependency).at[dependency, "available"]
+            )
+        for dataset_id in tuple(pending):
+            pending.update(
+                dependent
+                for dependent in self._DEPENDENTS.get(dataset_id, ())
+                if dependent in selected
+                or self.check(dependent).at[dependent, "available"]
+            )
+        for dataset_id in DATASET_IDS:
+            if dataset_id not in pending:
+                continue
+            status = self.check(dataset_id).loc[dataset_id]
+            if not bool(status["inputs_available"]):
+                continue
             processor = self._PROCESSORS[self.datasets[dataset_id]["processor"]]
             data = processor(self, dataset_id).build()
             _validate_dataset(data, dataset_id)
-            results[dataset_id] = data
-        return results[selected[0]] if isinstance(dataset_ids, str) else results
+        return self.check(selected)
 
-    def load(self, dataset_id: str) -> object:
+    def load(self, dataset_id: str | None = None) -> object:
+        """Load one dataset, or all datasets as a self-contained snapshot."""
+
+        if dataset_id is None:
+            return StandardData(
+                **{name: self.load(name) for name in DATASET_IDS},
+                config=self.config,
+            )
         self._select(dataset_id)
         paths = self._output_paths(dataset_id)
         if not all(path.exists() for path in paths):
@@ -126,7 +189,7 @@ class StandardDataManager:
                 f"{dataset_id} has not been built. Run build({dataset_id!r})."
             )
         if dataset_id == "network":
-            data = NetworkData(
+            data = StandardNetwork(
                 _read_geodataframe(paths[0]),
                 _read_geodataframe(paths[1]),
                 _read_geodataframe(paths[2]),
@@ -163,28 +226,17 @@ class StandardDataManager:
     def plot(self, dataset_id: str, **kwargs: object) -> PlotResult:
         """Return one representative figure without writing an output file."""
 
+        from ..plot import plot_standard
+
         data = self.load(dataset_id)
-        spatial_levels = kwargs.pop("spatial_levels", None)
-        if dataset_id == "spatial":
-            data = filter_spatial_levels(data, spatial_levels)
-        if dataset_id in {
-            "network",
-            "generator",
-            "storage",
-            "load",
-            "population",
-            "resource",
+        spatial = kwargs.pop("spatial", None)
+        if spatial is None and dataset_id in {
+            "network", "generator", "storage", "load", "population", "resource",
         }:
-            spatial = kwargs.pop("spatial", self.load("spatial"))
-            spatial = filter_spatial_levels(
-                spatial,
-                spatial_levels,
-            )
-            if spatial_levels is not None:
-                data = _filter_plot_extent(data, spatial)
-            kwargs["spatial"] = spatial
-        with plt.ioff():
-            figure = PLOTTERS[dataset_id](data, **kwargs)
+            spatial = self.load("spatial")
+        figure = plot_standard(
+            data, dataset_id, spatial=spatial, **kwargs
+        )
         if isinstance(data, xr.Dataset):
             data.close()
         return figure
@@ -196,7 +248,7 @@ class StandardDataManager:
         """Describe actual columns or arrays in materialized standard data."""
 
         selected = self._select(dataset_ids)
-        available = self.check(selected)["output_available"]
+        available = self.check(selected)["available"]
         if dataset_ids is not None and not available.all():
             raise FileNotFoundError(
                 "Standard outputs are unavailable for: "
@@ -245,6 +297,13 @@ class StandardDataManager:
         specs = config.get("options", {}).get("sources", ())
         return list(dict.fromkeys(str(spec["source_id"]) for spec in specs))
 
+    def _dependency_closure(self, dataset_id: str) -> tuple[str, ...]:
+        dependencies: list[str] = []
+        for dependency in self._DEPENDENCIES.get(dataset_id, ()):
+            dependencies.extend(self._dependency_closure(dependency))
+            dependencies.append(dependency)
+        return tuple(dict.fromkeys(dependencies))
+
     def _output_paths(self, dataset_id: str) -> list[Path]:
         config = self.datasets[dataset_id]
         if dataset_id == "network":
@@ -259,44 +318,3 @@ class StandardDataManager:
             else [config["output"]]
         )
         return [self.output_root / filename for filename in filenames]
-
-
-def _filter_plot_extent(data: object, spatial: gpd.GeoDataFrame) -> object:
-    """Limit a standard dataset to selected spatial units for plotting."""
-
-    if isinstance(data, gpd.GeoDataFrame):
-        region = _spatial_union(spatial, data.crs)
-        return data.loc[data.geometry.intersects(region)].copy()
-    if isinstance(data, xr.Dataset):
-        geometry = gpd.GeoSeries.from_wkt(
-            data["geometry"].values,
-            crs=str(data.attrs["crs"]),
-        )
-        region = _spatial_union(spatial, geometry.crs)
-        return data.isel(uid=np.flatnonzero(geometry.intersects(region)))
-    if isinstance(data, NetworkData):
-        bus_region = _spatial_union(spatial, data.bus.crs)
-        branch_region = _spatial_union(spatial, data.branch.crs)
-        return NetworkData(
-            data.bus.loc[data.bus.geometry.intersects(bus_region)].copy(),
-            data.branch.loc[
-                data.branch.geometry.intersects(branch_region)
-            ].copy(),
-            data.transformer.loc[
-                data.transformer.geometry.intersects(bus_region)
-            ].copy(),
-            data.converter.loc[
-                data.converter.geometry.intersects(bus_region)
-            ].copy(),
-        )
-    return data
-
-
-def _spatial_union(spatial: gpd.GeoDataFrame, crs: object) -> object:
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message="invalid value encountered in unary_union",
-            category=RuntimeWarning,
-        )
-        return polygonal_geometry(spatial.to_crs(crs).geometry.union_all())

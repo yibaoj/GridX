@@ -7,9 +7,9 @@ from dataclasses import fields
 import pandas as pd
 import xarray as xr
 
-from ..standard import NetworkData
+from ..standard import StandardNetwork
 from ..standard.schema import _SCHEMA_COLUMNS, _dataset_schema
-from .model import MappedNetwork, MappingData
+from .model import MappedData, MappedNetwork
 
 
 _DESCRIPTIONS = {
@@ -75,12 +75,12 @@ _REQUIRED = {
 
 def annotate_schema(
     data: object,
-    mapping_id: str,
+    dataset_id: str,
     component: str = "data",
 ) -> object:
     """Attach live schema requirements without adding data columns."""
 
-    required = tuple(_REQUIRED.get((mapping_id, component), ()))
+    required = tuple(_REQUIRED.get((dataset_id, component), ()))
     if isinstance(data, xr.Dataset):
         data.attrs["_schema_required_coordinates"] = required
         data.attrs["_schema_required_attributes"] = ("mapping_dataset_id",)
@@ -92,28 +92,30 @@ def annotate_schema(
 
 def mapping_schema(
     data: object,
-    mapping_id: str | None = None,
+    dataset_id: str | None = None,
 ) -> pd.DataFrame:
     """Describe actual structures contained in one or more mapped products."""
 
-    if isinstance(data, MappingData):
+    if isinstance(data, MappedData):
         tables = []
         for field in fields(data):
+            if field.name == "config":
+                continue
             tables.append(mapping_schema(getattr(data, field.name), field.name))
         return _finish(pd.concat(tables, ignore_index=True))
 
     if isinstance(data, MappedNetwork):
         table = pd.concat([
-            _component_schema(NetworkData(
+            _component_schema(StandardNetwork(
                 data.bus, data.branch, data.transformer, data.converter
             ), "network"),
             _component_schema(data.branch_mapping, "branch_mapping"),
         ], ignore_index=True)
-        table.insert(0, "mapping_id", mapping_id or "network")
+        table.insert(0, "dataset_id", dataset_id or "network")
         return _finish(table)
 
     table = _component_schema(data, "data")
-    table.insert(0, "mapping_id", mapping_id or pd.NA)
+    table.insert(0, "dataset_id", dataset_id or pd.NA)
     return _finish(table)
 
 
@@ -125,9 +127,9 @@ def _component_schema(data: object, component: str) -> pd.DataFrame:
 
 
 def _finish(table: pd.DataFrame) -> pd.DataFrame:
-    if "mapping_id" not in table:
-        table.insert(0, "mapping_id", pd.NA)
-    keys = list(zip(table["mapping_id"], table["component"]))
+    if "dataset_id" not in table:
+        table.insert(0, "dataset_id", pd.NA)
+    keys = list(zip(table["dataset_id"], table["component"]))
     required = [
         name == "mapping_dataset_id" or name in _REQUIRED.get(key, set())
         for key, name in zip(keys, table["name"])
@@ -141,7 +143,7 @@ def _finish(table: pd.DataFrame) -> pd.DataFrame:
     table.loc[missing, "description"] = table.loc[missing, "name"].map(
         _DESCRIPTIONS
     )
-    return table[["mapping_id", *_SCHEMA_COLUMNS]]
+    return table[["dataset_id", *_SCHEMA_COLUMNS]]
 
 
 class SchemaAccessor:

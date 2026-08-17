@@ -55,6 +55,29 @@ def operation_dataset(
                         dimension, static[column].astype(str).to_numpy()
                     )
                 })
+    optional = (
+        ("generator", network.generators, network.generators_t, (
+            ("status", "status", "binary"),
+            ("start_up", "start_up", "binary"),
+            ("shut_down", "shut_down", "binary"),
+        )),
+        ("bus", network.buses, network.buses_t, (
+            ("marginal_price", "marginal_price_eur_per_mwh", "EUR/MWh"),
+        )),
+    )
+    for component, static, dynamic, variables in optional:
+        dimension = f"{component}_uid"
+        if dimension not in data.coords:
+            data = data.assign_coords({dimension: static.index.astype(str).to_numpy()})
+        for source_name, output_name, unit in variables:
+            frame = getattr(dynamic, source_name, None)
+            if frame is None or frame.empty:
+                continue
+            frame = frame.reindex(index=snapshots, columns=static.index)
+            data[f"{component}_{output_name}"] = (
+                ("time", dimension), frame.to_numpy(dtype=float)
+            )
+            data[f"{component}_{output_name}"].attrs["unit"] = unit
     return data
 
 

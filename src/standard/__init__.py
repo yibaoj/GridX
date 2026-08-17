@@ -2,12 +2,12 @@
 
 from .geometry import polygonal_geometry
 from .manager import StandardDataManager
+from .model import StandardData, StandardNetwork
 from .parameter import ParameterData, ParameterValidationReport
 from .schema import (
     DATASET_IDS,
     REQUIRED_ATTRIBUTES,
     REQUIRED_COLUMNS,
-    NetworkData,
     time_bounds,
 )
 
@@ -15,7 +15,8 @@ __all__ = [
     "DATASET_IDS",
     "REQUIRED_ATTRIBUTES",
     "REQUIRED_COLUMNS",
-    "NetworkData",
+    "StandardData",
+    "StandardNetwork",
     "ParameterData",
     "ParameterValidationReport",
     "StandardDataManager",

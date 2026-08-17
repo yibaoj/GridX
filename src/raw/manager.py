@@ -51,17 +51,17 @@ class RawDataManager:
             file_checksum = (
                 checksum(checked_path, source) if checked_path is not None else ""
             )
-            validation_error = ""
+            validation_failed = False
             if checked_path is not None:
                 try:
                     self._downloader.validate(source, checked_path)
-                except Exception as error:
-                    validation_error = str(error)
+                except Exception:
+                    validation_failed = True
             checksum_ok = (
                 not source.get("expected_checksum")
                 or file_checksum.lower() == source["expected_checksum"].lower()
             )
-            if checked_path is not None and validation_error:
+            if checked_path is not None and validation_failed:
                 status = "invalid_source_file"
             elif exists and checksum_ok:
                 status = "available"
@@ -85,7 +85,6 @@ class RawDataManager:
             rows.append(
                 {
                     "source_id": source_id,
-                    "domain": source["domain"],
                     "provider": source["provider"],
                     "acquisition_method": source["acquisition_method"],
                     "file_format": source["file_format"],
@@ -94,15 +93,13 @@ class RawDataManager:
                         "; ".join(str(candidate) for candidate in downloaded_paths)
                         or pd.NA
                     ),
-                    "required": source["required"],
-                    "exists": exists,
+                    "available": status == "available",
                     "size_bytes": (
                         checked_path.stat().st_size
                         if checked_path is not None
                         else pd.NA
                     ),
                     "checksum": file_checksum,
-                    "validation_error": validation_error or pd.NA,
                     "status": status,
                     "download_instructions": source["download_instructions"],
                 }
@@ -118,8 +115,8 @@ class RawDataManager:
         """Download available sources and report manual or failed acquisitions."""
 
         selected = self._catalog.select(source_ids)
-        actions: dict[str, str] = {}
-        errors: dict[str, str] = {}
+        initial = self.check(selected.index)
+        status_overrides: dict[str, str] = {}
         for source_id, source in selected.iterrows():
             path = self._local_path(source)
             downloaded_paths = (
@@ -127,11 +124,6 @@ class RawDataManager:
             )
             if not path.is_file() and downloaded_paths:
                 if len(downloaded_paths) > 1:
-                    actions[source_id] = "multiple_local_candidates"
-                    errors[source_id] = (
-                        "More than one file matches remote_file_name: "
-                        + ", ".join(str(candidate) for candidate in downloaded_paths)
-                    )
                     continue
                 candidate = downloaded_paths[0]
                 expected = source.get("expected_checksum")
@@ -139,37 +131,33 @@ class RawDataManager:
                     expected
                     and checksum(candidate, source).lower() != expected.lower()
                 ):
-                    actions[source_id] = "candidate_checksum_mismatch"
-                    errors[source_id] = f"Checksum mismatch for {candidate}."
                     continue
                 try:
                     path.parent.mkdir(parents=True, exist_ok=True)
                     candidate.replace(path)
-                    actions[source_id] = "normalized_local_path"
                 except Exception as error:
-                    actions[source_id] = "path_normalization_failed"
-                    errors[source_id] = str(error)
+                    status_overrides[source_id] = "path_normalization_failed"
+                    warnings.warn(
+                        f"{source_id} path normalization failed: {error}",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
                 continue
-            current_status = self.check(source_id).loc[source_id, "status"]
+            current_status = initial.loc[source_id, "status"]
             if current_status == "available" and not overwrite:
-                actions[source_id] = "already_available"
                 continue
             method = source["acquisition_method"]
             if method == "manual":
-                actions[source_id] = "manual_action_required"
                 continue
             if (
                 method == "atlite_cds"
                 and not self._downloader.cds_credentials_available()
             ):
-                actions[source_id] = "credentials_required"
                 continue
             try:
                 self._downloader.download(source, path)
-                actions[source_id] = "downloaded"
             except Exception as error:
-                actions[source_id] = "download_failed"
-                errors[source_id] = str(error)
+                status_overrides[source_id] = "download_failed"
                 warnings.warn(
                     f"{source_id} download failed: {error}",
                     RuntimeWarning,
@@ -177,8 +165,8 @@ class RawDataManager:
                 )
 
         report = self.check(selected.index)
-        report["action"] = pd.Series(actions)
-        report["error"] = pd.Series(errors, dtype="string")
+        for source_id, status in status_overrides.items():
+            report.loc[source_id, ["available", "status"]] = [False, status]
         return report
 
     def get_file(self, source_id: str, *, must_exist: bool = True) -> Path:

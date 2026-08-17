@@ -54,12 +54,24 @@ class PowerSystemCase:
     validation: pd.DataFrame
     config: dict
 
-    def plot(self, component: str, **kwargs):
+    def plot(self, dataset_id: str, **kwargs: object) -> object:
         """Return one case-layer map without displaying or saving it."""
 
-        from .plot import plot_case
+        from ..plot import plot
 
-        return plot_case(self, component, **kwargs)
+        return plot(self, dataset_id, **kwargs)
+
+    def close(self) -> None:
+        """Close lazy time-series stores owned by this case."""
+
+        self.load.close()
+        self.resource.close()
+
+    def __enter__(self) -> "PowerSystemCase":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
 
     def to_pypsa(self, *, strict: bool | None = None):
         """Convert this case with the optional PyPSA backend."""

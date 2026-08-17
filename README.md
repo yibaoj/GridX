@@ -1,4 +1,4 @@
-# Power System Operations
+# GridX
 
 本目录保存中国电力系统开放数据的获取、标准化、时空映射、可视化和算例实验代码。
 代码统一在conda环境`env-py313`中运行：
@@ -33,15 +33,15 @@ conda activate env-py313
 | `config/class_mapping.csv` | generator/storage的有序分类规则 |
 | `config/mapping.toml` | 空间单元、重映射和节点匹配参数 |
 | `config/case.toml` | 算例筛选、聚合、时间和后端参数 |
-| `test_layers.ipynb` | 各层公共API和绘图示例 |
+| `notebooks/` | 各层公共API、探索验证和应用示例 |
 
-`osm_exp.ipynb`、`gem_exp.ipynb`、`load_exp.ipynb`、`cf_exp.ipynb`和
-`uc_exp.ipynb`保留探索过程与demo；可复用数据流程以`src/`模块为准。
+`notebooks/`中的实验文件保留探索过程与demo；可复用数据流程以`src/`模块为准。
 
 ## 原始数据层
 
 `source_id`是稳定的数据源标识。`local_path`在下载前定义，是raw manager唯一认可的
-规范保存位置；`options_json`保存特定source的下载或解析参数。
+规范保存位置；`options_json`保存特定source的下载或解析参数。source属于哪个标准
+dataset只在`standard_data.toml`中通过`source_ids`配置，raw catalog不重复记录归属。
 
 ```python
 from src.raw import RawDataManager
@@ -49,13 +49,17 @@ from src.raw import RawDataManager
 raw_data = RawDataManager()
 raw_data.check()
 raw_data.prepare("era5_china_2024")
+era5_file = raw_data.get_file("era5_china_2024")
 ```
 
-可直接下载的source由`prepare()`写入规范路径；需要许可或人工操作的source会返回明确
-状态和下载说明。OSM原始PBF通过以下脚本生成带OSM ID的GeoPackage：
+`available`仅在规范路径文件通过基本校验和checksum时为true；`status`解释不可用原因。
+`detected_path`只检查规范路径所在目录及`data/`根目录下与`remote_file_name`完全同名的
+候选文件，`prepare()`可将唯一候选移动到规范路径。可直接下载的source由`prepare()`
+写入规范路径；需要许可或人工操作的source会返回状态和下载说明。OSM原始PBF通过以下
+脚本生成带OSM ID的GeoPackage：
 
 ```bash
-./prepare_osm_power_network.sh \
+./config/prepare_osm_power_network.sh \
   data/osm/china-latest.osm.pbf \
   data/osm/china-power-network
 ```
@@ -68,15 +72,17 @@ ERA5下载需要接受CDS许可并配置`~/.cdsapirc`。年份、范围和特征
 固定dataset ID为`spatial`、`network`、`generator`、`storage`、`parameter`、
 `load`、`population`和`resource`。实体数据使用GeoParquet，连续时空数据使用
 xarray/NetCDF，network使用包含`bus`、`branch`、`transformer`和`converter`的
-`NetworkData`。
+`StandardNetwork`。
 
 ```python
 from src.standard import StandardDataManager
 
 standard_data = StandardDataManager("config/standard_data.toml")
 standard_data.check()
-network = standard_data.build("network")
+build_report = standard_data.build("network")
+network = standard_data.load("network")
 generator = standard_data.load("generator")
+all_standard_data = standard_data.load()
 
 network.schema
 generator.schema
@@ -113,9 +119,7 @@ schema基于真实输出生成，并校验必要字段、字段顺序、dtype、
 实现按职责分为：
 
 - `network.py`：OSM读取和拓扑编排。
-- `network_voltage.py`：电压推断、多电压拆分及回路/导体分配。
-- `network_nodes.py`：节点分类、去重和完整性校验。
-- `network_electrical.py`：从内部地理nodes生成四类标准电气对象并校验端点一致性。
+- `network_model.py`：电压推断、节点清洗，以及四类标准电气对象的构造和校验。
 
 标准network不设置最低电压筛选；220/500 kV等算例范围留给case层。所有bus和branch
 均为单电压且具有AC/DC属性，branch与两端bus的电压和电流类型必须完全一致。普通同位置
@@ -182,7 +186,9 @@ resolved = parameter.resolve(
 ### 绘图
 
 ```python
-figure = standard_data.plot("network")
+# Manager和完整数据对象使用同一个接口。
+figure = standard_manager.plot("network")
+same_figure = standard_data.plot("network")
 figures = standard_data.plot("resource", year=2024)
 ```
 
@@ -195,11 +201,15 @@ plot接口只返回Figure，不主动display或保存。所有地图支持`map_c
 from src.mapping import SpatiotemporalMappingManager
 
 mapping = SpatiotemporalMappingManager("config/mapping.toml", standard_data)
-mapped_data = mapping.build()
-mapping.check()
+build_report = mapping.build()
+mapped_data = mapping.load()
 generator = mapping.load("generator")
 mapping.schema(["network", "generator"])
 ```
+
+`mapped_data`是包含全部八类dataset及mapping配置快照的`MappedData`。其中`parameter`从
+standard层原样继承并写入`outputs/mapping/parameter.parquet`，因此case层只需要一个
+完整的mapped-data入口。
 
 `build()`完成以下工作：
 
@@ -225,15 +235,16 @@ load是extensive量，拆分后保持总量；resource是intensive量，使用�
 全部结果写入`outputs/mapping/`，不会覆盖standard数据。
 
 ```python
-figure = mapping.plot("generator")
-figures = mapping.plot("load", year=2024)
+figure = mapping_manager.plot("generator")
+same_figure = mapped_data.plot("generator")
+figures = mapped_data.plot("load", year=2024)
 ```
 
 standard和mapping使用相同plot API、投影、配色和图例规则。
 
 ## 算例层
 
-`PowerSystemCase`只依赖mapped data和standard parameter，不读取原始source。它按配置
+`PowerSystemCase`只依赖mapped data（其中已包含parameter），不读取standard或原始source。它按配置
 筛选电压、状态和容量，重建最大连通子图，复用mapping接口重新挂接generator、storage
 和load，解析参数，并按bus或cell聚合资产。
 
@@ -243,10 +254,9 @@ from src.case import PowerSystemCaseManager
 case_manager = PowerSystemCaseManager(
     "config/case.toml",
     mapped_data=mapped_data,
-    standard_data=standard_data,
 )
-case = case_manager.build()
-case_manager.check()
+build_report = case_manager.build()
+case = case_manager.load()
 generator = case_manager.load("generator")
 # Reconstruct the complete case without rebuilding it.
 case = case_manager.load()
@@ -254,6 +264,11 @@ case.validation
 case.parameter_manifest()
 pypsa_network = case.to_pypsa(strict=False)
 ```
+
+四层管理器采用相同的离线接口约定：`prepare/build(..., overwrite=False)`先检查，仅补全
+缺失结果，完成后返回精简DataFrame报告；`overwrite=True`强制重建；`load()`或
+`get_file()`负责读取持久化结果。mapping会自动重建受上游变化影响的依赖闭包；case是
+一个必须内部一致的整体，任一组成文件缺失时会重建完整case，而不是混用不同批次文件。
 
 `case.network`包含bus、branch、transformer和converter；每个静态组件均提供`.data`、
 `.parameter`和`.membership`。参数表保留`uid/name/group/value/unit`、命中规则和source
@@ -273,7 +288,13 @@ case绘图与standard/mapping保持相同API，只返回Figure：
 
 ```python
 figure = case_manager.plot("network")
+same_figure = case.plot("network")
 ```
+
+三层绘图统一由`src.plot`分派，manager和数据对象都使用
+`plot(dataset_id, **kwargs)`；各层只保留自身的数据准备差异。`case_manager`会缓存完整case，
+避免连续绘图时重复打开大体量时序文件。Notebook展示后应调用`plt.close(figure)`；不用完整case
+时可调用`case_manager.close()`释放NetCDF句柄。
 
 ## 应用层
 
@@ -295,7 +316,7 @@ figure = application.plot(
 )
 ```
 
-case的七类公共数据写入`outputs/case/`；`load(dataset_id)`可独立读取，`load()`恢复完整
+case的七类公共数据写入唯一目录`outputs/case/`；`load(dataset_id)`可独立读取，`load()`恢复完整
 `PowerSystemCase`。case和application的plot接口均只返回Figure，不自动保存图片。
 
 `application.list()`按sets、parameters、variables、objective、系统约束和设备约束顺序
@@ -305,17 +326,20 @@ case的七类公共数据写入`outputs/case/`；`load(dataset_id)`可独立读�
 流程验证。UC完成后，逐generator、storage、load、AC line、transformer和link的原始时序
 写入`outputs/app/uc/timeseries.nc`，求解摘要写入`summary.json`。保存前会检查有限值、
 发电非负和储能功率上限；未通过检查的求解中间量不会覆盖已有结果。
+`UnitCommitmentResult`同时持有输入case、内存中的PyPSA network、带UID和单位的xarray
+时序、求解状态及摘要；从磁盘恢复时network不再反序列化，但绘图和结果分析所需的调度、
+SOC、潮流、可用的启停变量和节点边际电价均保存在NetCDF中。
 `solve_mode="rolling_horizon"`按配置窗口顺序求解并传递储能SOC。500 kV+全国网络适合
 算例检查，但日/周交互展示应使用已说明分辨率的应用算例；当前验证结果采用900 kV+
 筛选后的1,000 kV交流最大连通网。
 
 ## Notebook与应用
 
-- `osm_exp.ipynb`：OSM GIS和拓扑探索验证。
-- `gem_exp.ipynb`：GEM电源、参数和候选station映射。
-- `load_exp.ipynb`：省级逐时负荷、人口权重和station负荷。
-- `cf_exp.ipynb`：ERA5风光水资源可用率。
-- `uc_exp.ipynb`：PyPSA一日UC demo，不含N-1/N-k安全约束。
+- `notebooks/osm_exp.ipynb`：OSM GIS和拓扑探索验证。
+- `notebooks/gem_exp.ipynb`：GEM电源、参数和候选station映射。
+- `notebooks/load_exp.ipynb`：省级逐时负荷、人口权重和station负荷。
+- `notebooks/cf_exp.ipynb`：ERA5风光水资源可用率。
+- `notebooks/uc_exp.ipynb`：PyPSA一日UC demo，不含N-1/N-k安全约束。
 - `LOAD_WEIGHTING.md`：工业、人口和夜间灯光组合负荷权重方案。
 
 GridX（网探）网站只读取`outputs/web/`中的离线绘图数据。先调用与后端plot共享的准备
@@ -328,6 +352,12 @@ conda run -n env-py313 python -m src.web.app
 
 网站请求期间不再启动GeoPandas/Xarray聚合；预压缩文件由HTTP服务直接发送。访问
 `http://127.0.0.1:8765`。
+
+`outputs/web/manifest.json.gz`描述可用层和资源子类，`boundary/common.json.gz`保存共享背景边界，
+`layers/{standard,mapping,case}/`按dataset惰性加载地图载荷，`application/uc.json.gz`
+保存生产模拟图所需的时序。`src/web/build.py`直接复用后端plot模块中的
+`prepare_*`函数，而不是另写统计口径；压缩、几何简化和分层文件切分均在离线构建期完成。
+case层resource与mapping层相同，服务端直接复用mapping载荷，不生成重复文件。
 
 ## 重要限制
 

@@ -14,7 +14,7 @@ output = "network"
 
 [datasets.network.options]
 feature_layer = "power_features"
-preparation_script = "prepare_osm_power_network.sh"
+preparation_script = "config/prepare_osm_power_network.sh"
 feature_output_prefix = "data/osm/china-power-network"
 reference_cache = "outputs/standard/cache/osm_power_ways.osm.pbf"
 require_line_voltage = false

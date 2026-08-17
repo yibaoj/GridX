@@ -13,13 +13,11 @@ class SourceCatalog:
 
     REQUIRED_COLUMNS = {
         "source_id",
-        "domain",
         "provider",
         "acquisition_method",
         "file_format",
         "local_path",
         "source_url",
-        "required",
         "description",
         "download_instructions",
     }
@@ -48,17 +46,6 @@ class SourceCatalog:
                     raise ValueError(
                         f"{source_id} remote_file_name must contain only a filename."
                     )
-        table["required"] = pd.Series(
-            [
-                True
-                if str(value).strip().lower() in {"1", "true", "yes"}
-                else False
-                if str(value).strip().lower() in {"0", "false", "no"}
-                else pd.NA
-                for value in table["required"]
-            ],
-            dtype="boolean",
-        )
         self.table = table.set_index("source_id", drop=False)
 
     def select(

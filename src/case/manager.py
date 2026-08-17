@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 import tomllib
 
@@ -10,26 +11,25 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 
-from ..mapping import MappingData, SpatiotemporalMappingManager
-from ..standard import NetworkData, StandardDataManager
+from ..mapping import MappedData, SpatiotemporalMappingManager
+from ..standard import StandardNetwork
 from .aggregate import aggregate_assets, aggregate_load
 from .backends.manifest import load_pypsa_manifest
 from .io import CASE_DATASETS, case_outputs, load_case, load_case_dataset, save_case
 from .model import CaseComponent, CaseNetwork, PowerSystemCase
 from .network import filter_network
-from .parameters import resolve_parameters
+from .parameter import resolve_parameters
 from .remap import remap_assets, remap_load
 from .time import select_time
 
 
 class PowerSystemCaseManager:
-    """Construct a backend-neutral case from mapped and standard data."""
+    """Construct a backend-neutral case from one mapped-data snapshot."""
 
     def __init__(
         self,
         config_path: str | Path = "config/case.toml",
-        mapped_data: MappingData | SpatiotemporalMappingManager | None = None,
-        standard_data: StandardDataManager | None = None,
+        mapped_data: MappedData | SpatiotemporalMappingManager | None = None,
     ) -> None:
         path = Path(config_path).expanduser()
         if not path.is_absolute() and not path.exists():
@@ -37,171 +37,37 @@ class PowerSystemCaseManager:
         with path.resolve().open("rb") as file:
             self.config = tomllib.load(file)
         self.output_root = path.resolve().parents[1] / self.config["general"]["output_root"]
-        if standard_data is None and isinstance(
-            mapped_data, SpatiotemporalMappingManager
+        if isinstance(mapped_data, SpatiotemporalMappingManager):
+            self.mapping_manager = mapped_data
+            self.mapped_data = None
+        elif mapped_data is None:
+            self.mapping_manager = SpatiotemporalMappingManager(
+                path.resolve().parents[1] / "config/mapping.toml"
+            )
+            self.mapped_data = None
+        else:
+            self.mapping_manager = None
+            self.mapped_data = mapped_data
+        self._case_cache: PowerSystemCase | None = None
+
+    def build(
+        self,
+        dataset_ids: str | Iterable[str] | None = None,
+        *,
+        overwrite: bool = False,
+    ) -> pd.DataFrame:
+        """Build a missing coherent case and return its final check report."""
+
+        selected = self._select(dataset_ids)
+        complete = bool(self.check()["case_complete"].iat[0])
+        initial = self.check(selected)
+        if (
+            (overwrite or not complete)
+            and bool(initial["inputs_available"].iat[0])
         ):
-            standard_data = mapped_data.standard_data
-        self.standard_data = standard_data or StandardDataManager(
-            path.resolve().parents[1] / "config/standard_data.toml"
-        )
-        self.mapping_manager = (
-            mapped_data if isinstance(mapped_data, SpatiotemporalMappingManager)
-            else SpatiotemporalMappingManager(
-                path.resolve().parents[1] / "config/mapping.toml",
-                self.standard_data,
-            )
-        )
-        self.mapped_data = (
-            None if isinstance(mapped_data, SpatiotemporalMappingManager)
-            else mapped_data
-        )
-
-    def build(self) -> PowerSystemCase:
-        """Build, validate, and return the configured case."""
-
-        options = self.config
-        general = options["general"]
-        mapped_data = self.mapped_data or self.mapping_manager.load()
-        network_data, branch_mapping = filter_network(
-            mapped_data.network, options["network"]
-        )
-        cells = mapped_data.spatial
-        bus_subclasses = list(options["network"].get("bus_subclasses", []))
-        common = {
-            "buses": network_data.bus,
-            "cells": cells,
-            "metric_crs": str(general["metric_crs"]),
-            "random_seed": int(general["random_seed"]),
-            "bus_subclasses": bus_subclasses,
-        }
-
-        generator = remap_assets(
-            _filter_assets(
-                mapped_data.generator,
-                options["assets"]["generator"],
-                "capacity_mw",
-            ),
-            dataset_id="generator",
-            options=options["asset_bus_mapping"]["generator"],
-            **common,
-        )
-        storage = remap_assets(
-            _filter_assets(
-                mapped_data.storage,
-                options["assets"]["storage"],
-                "power_capacity_mw",
-            ),
-            dataset_id="storage",
-            options=options["asset_bus_mapping"]["storage"],
-            **common,
-        )
-        load = remap_load(
-            select_time(mapped_data.load, options["time"]),
-            options=options["load_bus_mapping"],
-            **common,
-        )
-        # Resource remains the mapped-layer product. Backend adapters select the
-        # snapshots required by the case load when constructing a simulation.
-        resource = mapped_data.resource
-        load_cells = load
-
-        parameter_source = self.standard_data.load("parameter")
-        at = options["parameters"].get("at")
-        parameters = {
-            "bus": resolve_parameters(
-                network_data.bus, parameter_source,
-                dataset_id="network", component="bus", at=at,
-            ),
-            "branch": resolve_parameters(
-                network_data.branch, parameter_source,
-                dataset_id="network", component="branch", at=at,
-            ),
-            "transformer": resolve_parameters(
-                network_data.transformer, parameter_source,
-                dataset_id="network", component="transformer", at=at,
-            ),
-            "converter": resolve_parameters(
-                network_data.converter, parameter_source,
-                dataset_id="network", component="converter", at=at,
-            ),
-            "generator": resolve_parameters(
-                generator, parameter_source,
-                dataset_id="generator", component="generator", at=at,
-            ),
-            "storage": resolve_parameters(
-                storage, parameter_source,
-                dataset_id="storage", component="storage", at=at,
-            ),
-        }
-
-        aggregation = options["aggregation"]
-        aggregate_options = {
-            "buses": network_data.bus,
-            "cells": cells,
-            "sum_names": list(aggregation.get("sum_parameter_names", [])),
-            "boolean_names": list(aggregation.get("boolean_parameter_names", [])),
-        }
-        generator, parameters["generator"], generator_membership = aggregate_assets(
-            generator, parameters["generator"], dataset_id="generator",
-            method=str(aggregation["generator"]), **aggregate_options,
-        )
-        storage, parameters["storage"], storage_membership = aggregate_assets(
-            storage, parameters["storage"], dataset_id="storage",
-            method=str(aggregation["storage"]), **aggregate_options,
-        )
-        if aggregation["generator"] == "cell":
-            generator = remap_assets(
-                generator, dataset_id="generator",
-                options=options["asset_bus_mapping"]["generator"], **common,
-            )
-        if aggregation["storage"] == "cell":
-            storage = remap_assets(
-                storage, dataset_id="storage",
-                options=options["asset_bus_mapping"]["storage"], **common,
-            )
-        load = aggregate_load(load, str(aggregation["load"]))
-
-        network = CaseNetwork(
-            bus=_component(network_data.bus, parameters["bus"]),
-            branch=_component(network_data.branch, parameters["branch"]),
-            transformer=_component(
-                network_data.transformer, parameters["transformer"]
-            ),
-            converter=_component(network_data.converter, parameters["converter"]),
-            branch_mapping=branch_mapping,
-        )
-        validation = _validate_case(
-            network_data,
-            generator,
-            storage,
-            load,
-            load_cells,
-            mapped_data.population,
-            resource,
-            parameters,
-            load_pypsa_manifest(
-                options["backend"]["pypsa"]["parameter_manifest"]
-            ),
-            generator_membership,
-            dict(options["backend"]["pypsa"].get("resource_class_mapping", {})),
-        )
-        case = PowerSystemCase(
-            network=network,
-            generator=CaseComponent(
-                generator, parameters["generator"], generator_membership
-            ),
-            storage=CaseComponent(
-                storage, parameters["storage"], storage_membership
-            ),
-            load=load,
-            spatial=mapped_data.spatial,
-            resource=resource,
-            population=mapped_data.population,
-            validation=validation,
-            config=self.config,
-        )
-        save_case(case, self.output_root)
-        return case
+            self.close()
+            self._build_case()
+        return self.check(selected)
 
     def load(self, dataset_id: str | None = None) -> object:
         """Load one case dataset, or the complete reusable case."""
@@ -223,25 +89,203 @@ class PowerSystemCaseManager:
                 f"{[str(path) for path in missing[:5]]}"
             )
         if dataset_id is None:
-            return load_case(self.output_root, self.config)
+            if self._case_cache is None:
+                self._case_cache = load_case(self.output_root, self.config)
+            return self._case_cache
         return load_case_dataset(self.output_root, dataset_id, self.config)
 
-    def check(self) -> pd.Series:
+    def check(
+        self,
+        dataset_ids: str | Iterable[str] | None = None,
+    ) -> pd.DataFrame:
         """Report whether every public case dataset is available."""
 
+        selected = self._select(dataset_ids)
         paths = case_outputs(self.output_root)
-        return pd.Series({
-            dataset_id: all(
+        case_complete = all(path.exists() for path in paths)
+        mapped_inputs_available = (
+            self.mapped_data is not None
+            or bool(self.mapping_manager.check()["available"].all())
+        )
+        inputs_available = bool(mapped_inputs_available)
+        rows = []
+        for dataset_id in selected:
+            available = all(
                 path.exists() for path in paths
                 if _case_path_dataset(path, self.output_root) == dataset_id
             )
-            for dataset_id in CASE_DATASETS
-        }, name="output_available")
+            rows.append({
+                "dataset_id": dataset_id,
+                "inputs_available": inputs_available,
+                "available": available,
+                "case_complete": case_complete,
+                "status": (
+                    "available"
+                    if available and case_complete
+                    else "incomplete_case"
+                    if available
+                    else "ready_to_build"
+                    if inputs_available
+                    else "input_unavailable"
+                ),
+            })
+        return pd.DataFrame(rows).set_index("dataset_id")
 
     def plot(self, dataset_id: str, **kwargs: object):
         """Return a case figure without displaying or saving it."""
 
         return self.load().plot(dataset_id, **kwargs)
+
+    def close(self) -> None:
+        """Close and release the cached complete case, if loaded."""
+
+        case = getattr(self, "_case_cache", None)
+        if case is not None:
+            case.close()
+            self._case_cache = None
+
+    @staticmethod
+    def _select(
+        dataset_ids: str | Iterable[str] | None,
+    ) -> list[str]:
+        selected = (
+            list(CASE_DATASETS)
+            if dataset_ids is None
+            else [dataset_ids]
+            if isinstance(dataset_ids, str)
+            else list(dataset_ids)
+        )
+        unknown = set(selected).difference(CASE_DATASETS)
+        if unknown:
+            raise KeyError(f"Unknown case dataset IDs: {sorted(unknown)}")
+        return selected
+
+    def _build_case(self) -> None:
+        """Construct and persist one internally consistent case bundle."""
+
+        options = self.config
+        mapped_data = (
+            self.mapped_data
+            if self.mapped_data is not None
+            else self.mapping_manager.load()
+        )
+        network_data, branch_mapping = filter_network(
+            mapped_data.network, options["network"]
+        )
+        cells = mapped_data.spatial
+        common = {
+            "buses": network_data.bus,
+            "cells": cells,
+            "metric_crs": str(options["general"]["metric_crs"]),
+            "random_seed": int(options["general"]["random_seed"]),
+            "bus_subclasses": list(
+                options["network"].get("bus_subclasses", [])
+            ),
+        }
+        generator = remap_assets(
+            _filter_assets(
+                mapped_data.generator, options["assets"]["generator"],
+                "capacity_mw",
+            ),
+            dataset_id="generator",
+            options=options["asset_bus_mapping"]["generator"],
+            **common,
+        )
+        storage = remap_assets(
+            _filter_assets(
+                mapped_data.storage, options["assets"]["storage"],
+                "power_capacity_mw",
+            ),
+            dataset_id="storage",
+            options=options["asset_bus_mapping"]["storage"],
+            **common,
+        )
+        load = remap_load(
+            select_time(mapped_data.load, options["time"]),
+            options=options["load_bus_mapping"],
+            **common,
+        )
+        resource = mapped_data.resource
+        load_cells = load
+        at = options["parameters"].get("at")
+        parameters = {
+            component: resolve_parameters(
+                getattr(network_data, component), mapped_data.parameter,
+                dataset_id="network", component=component, at=at,
+            )
+            for component in ("bus", "branch", "transformer", "converter")
+        }
+        parameters.update({
+            "generator": resolve_parameters(
+                generator, mapped_data.parameter,
+                dataset_id="generator", component="generator", at=at,
+            ),
+            "storage": resolve_parameters(
+                storage, mapped_data.parameter,
+                dataset_id="storage", component="storage", at=at,
+            ),
+        })
+        aggregation = options["aggregation"]
+        aggregate_options = {
+            "buses": network_data.bus,
+            "cells": cells,
+            "sum_names": list(aggregation.get("sum_parameter_names", [])),
+            "boolean_names": list(
+                aggregation.get("boolean_parameter_names", [])
+            ),
+        }
+        generator, parameters["generator"], generator_membership = aggregate_assets(
+            generator, parameters["generator"], dataset_id="generator",
+            method=str(aggregation["generator"]), **aggregate_options,
+        )
+        storage, parameters["storage"], storage_membership = aggregate_assets(
+            storage, parameters["storage"], dataset_id="storage",
+            method=str(aggregation["storage"]), **aggregate_options,
+        )
+        if aggregation["generator"] == "cell":
+            generator = remap_assets(
+                generator, dataset_id="generator",
+                options=options["asset_bus_mapping"]["generator"], **common,
+            )
+        if aggregation["storage"] == "cell":
+            storage = remap_assets(
+                storage, dataset_id="storage",
+                options=options["asset_bus_mapping"]["storage"], **common,
+            )
+        load = aggregate_load(load, str(aggregation["load"]))
+        network = CaseNetwork(
+            bus=_component(network_data.bus, parameters["bus"]),
+            branch=_component(network_data.branch, parameters["branch"]),
+            transformer=_component(
+                network_data.transformer, parameters["transformer"]
+            ),
+            converter=_component(network_data.converter, parameters["converter"]),
+            branch_mapping=branch_mapping,
+        )
+        validation = _validate_case(
+            network_data, generator, storage, load, load_cells,
+            mapped_data.population, resource, parameters,
+            load_pypsa_manifest(
+                options["backend"]["pypsa"]["parameter_manifest"]
+            ),
+            generator_membership,
+            dict(options["backend"]["pypsa"].get("resource_class_mapping", {})),
+        )
+        save_case(PowerSystemCase(
+            network=network,
+            generator=CaseComponent(
+                generator, parameters["generator"], generator_membership
+            ),
+            storage=CaseComponent(
+                storage, parameters["storage"], storage_membership
+            ),
+            load=load,
+            spatial=mapped_data.spatial,
+            resource=resource,
+            population=mapped_data.population,
+            validation=validation,
+            config=self.config,
+        ), self.output_root)
 
 
 def _filter_assets(
@@ -275,7 +319,7 @@ def _component(data: gpd.GeoDataFrame, parameter: pd.DataFrame) -> CaseComponent
 
 
 def _validate_case(
-    network: NetworkData,
+    network: StandardNetwork,
     generator: gpd.GeoDataFrame,
     storage: gpd.GeoDataFrame,
     load,
