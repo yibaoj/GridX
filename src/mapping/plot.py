@@ -21,7 +21,6 @@ from ..standard.plot import (
     DEFAULT_MAP_CRS,
     PlotResult,
     add_asset_legends,
-    class_label,
     continuous_map,
     draw_background,
     draw_boundaries,
@@ -33,6 +32,7 @@ from ..standard.plot import (
     network_style_sort_key,
 )
 from ..standard import StandardNetwork
+from ..visualization.labels import class_label, text
 from .model import MappedNetwork
 
 
@@ -74,6 +74,7 @@ def plot_spatial(
     spatial: gpd.GeoDataFrame | None = None,
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
+    language: str = "zh",
     **_: object,
 ) -> Figure:
     """Plot the clipped standard spatial cells."""
@@ -103,7 +104,9 @@ def plot_spatial(
                 )
         draw_boundaries(axis, spatial, map_crs=map_crs, zorder=3)
         finish_map(
-            axis, f"Mapped spatial cells ({len(data):,})" if index == 0 else ""
+            axis,
+            text("mapped_spatial", language, count=len(data))
+            if index == 0 else "",
         )
     return figure
 
@@ -114,6 +117,7 @@ def plot_population(
     spatial: gpd.GeoDataFrame | None = None,
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
+    language: str = "zh",
     **_: object,
 ) -> Figure:
     frame = prepare_population_plot(data)
@@ -121,8 +125,8 @@ def plot_population(
         frame,
         "_value",
         spatial=spatial,
-        title="Population mapped to standard spatial cells",
-        label="log10(人口 + 1)",
+        title=text("mapped_population", language),
+        label=text("population_label", language),
         map_crs=map_crs,
         china_inset=china_inset,
     )
@@ -136,6 +140,7 @@ def plot_load(
     spatial: gpd.GeoDataFrame | None = None,
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
+    language: str = "zh",
     **_: object,
 ) -> PlotResult:
     return timeseries_class_maps(
@@ -147,6 +152,7 @@ def plot_load(
         quantity="load",
         map_crs=map_crs,
         china_inset=china_inset,
+        language=language,
     )
 
 
@@ -158,6 +164,7 @@ def plot_resource(
     spatial: gpd.GeoDataFrame | None = None,
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
+    language: str = "zh",
     **_: object,
 ) -> PlotResult:
     return timeseries_class_maps(
@@ -169,6 +176,7 @@ def plot_resource(
         quantity="resource",
         map_crs=map_crs,
         china_inset=china_inset,
+        language=language,
     )
 
 
@@ -180,6 +188,7 @@ def asset_pie_map(
     spatial: gpd.GeoDataFrame | None,
     map_crs: str,
     china_inset: bool | None,
+    language: str,
 ) -> Figure:
     """Plot class shares as capacity-scaled pies at occupied cell centres."""
 
@@ -227,12 +236,19 @@ def asset_pie_map(
         if axis_index == 0:
             add_asset_legends(
                 axis,
-                [Patch(facecolor=colors[item], label=class_label(item)) for item in classes],
+                [
+                    Patch(
+                        facecolor=colors[item],
+                        label=class_label(item, language),
+                    )
+                    for item in classes
+                ],
                 reference,
+                language,
             )
         finish_map(
             axis,
-            f"{title}: class share by cell (circle size = total capacity)"
+            text("asset_cell_share", language, title=title)
             if axis_index == 0 else "",
         )
     return figure
@@ -284,11 +300,12 @@ def plot_generator(
     spatial: gpd.GeoDataFrame | None = None,
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
+    language: str = "zh",
     **_: object,
 ) -> Figure:
     return asset_pie_map(
-        data, cells, "capacity_mw", "Mapped generator", spatial, map_crs,
-        china_inset,
+        data, cells, "capacity_mw", text("mapped_generator", language),
+        spatial, map_crs, china_inset, language,
     )
 
 
@@ -299,11 +316,12 @@ def plot_storage(
     spatial: gpd.GeoDataFrame | None = None,
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
+    language: str = "zh",
     **_: object,
 ) -> Figure:
     return asset_pie_map(
-        data, cells, "power_capacity_mw", "Mapped storage", spatial, map_crs,
-        china_inset,
+        data, cells, "power_capacity_mw", text("mapped_storage", language),
+        spatial, map_crs, china_inset, language,
     )
 
 
@@ -315,6 +333,7 @@ def plot_network(
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
     title: str | None = None,
+    language: str = "zh",
     **_: object,
 ) -> Figure:
     """Plot the retained connected branches and junction/station buses."""
@@ -359,10 +378,10 @@ def plot_network(
                 ],
                     Line2D([0], [0], marker="o", linestyle="none",
                            color="#596267", markersize=4,
-                           label="Junction"),
+                           label=text("junction", language)),
                     Line2D([0], [0], marker="o", linestyle="none",
                            color="#d1495b", markersize=5,
-                           label="Station"),
+                           label=text("station", language)),
                 ],
                 loc="lower left",
                 bbox_to_anchor=(0.095, 0.07),
@@ -374,8 +393,10 @@ def plot_network(
             axis,
             (
                 title or (
-                    f"Mapped largest connected network: {len(data.bus):,} buses, "
-                    f"{len(data.branch):,} branches"
+                    text(
+                        "mapped_network", language,
+                        buses=len(data.bus), branches=len(data.branch),
+                    )
                 )
                 if index == 0 else ""
             ),

@@ -226,7 +226,7 @@ class StandardDataManager:
     def plot(self, dataset_id: str, **kwargs: object) -> PlotResult:
         """Return one representative figure without writing an output file."""
 
-        from ..plot import plot_standard
+        from ..visualization import plot_standard
 
         data = self.load(dataset_id)
         spatial = kwargs.pop("spatial", None)

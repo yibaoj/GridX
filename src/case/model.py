@@ -57,7 +57,7 @@ class PowerSystemCase:
     def plot(self, dataset_id: str, **kwargs: object) -> object:
         """Return one case-layer map without displaying or saving it."""
 
-        from ..plot import plot
+        from ..visualization import plot
 
         return plot(self, dataset_id, **kwargs)
 

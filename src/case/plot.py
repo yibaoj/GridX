@@ -22,6 +22,8 @@ from ..standard.plot import (
     PlotResult,
     filter_spatial_levels,
 )
+from ..visualization.labels import text
+from ..visualization.spatial import spatial_background
 from .model import PowerSystemCase
 
 
@@ -39,6 +41,7 @@ def plot_case(
     spatial_levels: str | Iterable[str] | None = None,
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
+    language: str = "zh",
     **kwargs: object,
 ) -> PlotResult:
     """Plot one case component with the common map API."""
@@ -58,6 +61,7 @@ def plot_case(
         "spatial": background,
         "map_crs": map_crs,
         "china_inset": china_inset,
+        "language": language,
     }
     with plt.ioff():
         if component == "spatial":
@@ -80,8 +84,10 @@ def plot_case(
             )
             kwargs.setdefault(
                 "title",
-                f"Case network: {len(network.bus):,} buses, "
-                f"{len(network.branch):,} branches",
+                text(
+                    "case_network", language,
+                    buses=len(network.bus), branches=len(network.branch),
+                ),
             )
             return plot_mapped_network(
                 network,
@@ -98,22 +104,14 @@ def plot_case(
                 data,
                 bus_cells,
                 "capacity_mw" if component == "generator" else "power_capacity_mw",
-                str(kwargs.get("title", f"Case {component}")),
+                str(kwargs.get(
+                    "title", text(f"case_{component}", language)
+                )),
                 background,
                 map_crs,
                 china_inset,
+                language,
             )
-
-
-def spatial_background(cells: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Recover an administrative display boundary from case cells."""
-
-    frame = cells[["admin_uid", "spatial_level", "geometry"]].dissolve(
-        by=["admin_uid", "spatial_level"], as_index=False
-    )
-    return frame.rename(columns={
-        "admin_uid": "uid", "spatial_level": "level",
-    })
 
 
 def load_with_bus_geometry(case: PowerSystemCase) -> xr.Dataset:

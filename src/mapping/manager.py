@@ -187,7 +187,7 @@ class SpatiotemporalMappingManager:
     def plot(self, dataset_id: str, **kwargs: object) -> PlotResult:
         """Return one mapped-data figure without writing an output file."""
 
-        from ..plot import plot_mapped
+        from ..visualization import plot_mapped
 
         data = self.load(dataset_id)
         spatial = kwargs.pop("spatial", None)
@@ -200,7 +200,7 @@ class SpatiotemporalMappingManager:
             cells = self.load("spatial") if cells is None else cells
         figure = plot_mapped(
             data, dataset_id, cells=cells, spatial=spatial,
-            map_crs=str(self.options["metric_crs"]), **kwargs,
+            **kwargs,
         )
         if isinstance(data, xr.Dataset):
             data.close()

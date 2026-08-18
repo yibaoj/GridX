@@ -26,13 +26,13 @@ from ..standard import StandardNetwork, StandardDataManager
 from ..standard.plot import (
     CATEGORY_COLORS,
     capacity_legend_values,
-    class_label,
     prepare_asset_points,
     prepare_network_plot,
     prepare_population_plot,
     prepare_timeseries_plot,
     network_style_sort_key,
 )
+from ..visualization.labels import class_label
 
 
 class WebDataBuilder:
@@ -214,7 +214,7 @@ class WebDataBuilder:
             selected = str(data["class"].values.astype(str)[0])
         prepared = prepare_timeseries_plot(
             data, variable=variable, year=self.year,
-            class_name=selected, quantity=quantity,
+            class_name=selected, quantity=quantity, language="zh",
         )
         frame, metadata = prepared[selected]
         frame = frame.assign(location_uid=data["uid"].values.astype(str)).to_crs(4326)
@@ -298,7 +298,7 @@ class WebDataBuilder:
         classes = data["class"].values.astype(str).tolist()
         data.close()
         return [
-            {"id": item, "label": class_label(item)} for item in classes
+            {"id": item, "label": class_label(item, "zh")} for item in classes
         ]
 
     def _write(self, relative: str, payload: dict[str, Any]) -> None:
@@ -315,7 +315,7 @@ class WebDataBuilder:
 
 def _category_metadata(classes: list[str]) -> list[dict[str, str]]:
     return [{
-        "id": str(item), "label": class_label(item),
+        "id": str(item), "label": class_label(item, "zh"),
         "color": _color_hex(CATEGORY_COLORS.get(str(item), "#909691")),
     } for item in dict.fromkeys(classes)]
 

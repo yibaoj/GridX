@@ -153,6 +153,15 @@ UC/ED, and returns a result object with solver status and a configurable
 time/spatial-scope production plot. Binary unit commitment remains a future
 formulation because the current case aggregates units by bus and technology.
 
+## Shared visualization
+
+`src/visualization/` is a cross-layer presentation utility, not a data layer.
+It owns the bilingual text catalog, font selection, display CRS, South China
+Sea inset default, and common `plot(dataset_id, **kwargs)` dispatch. Standard,
+mapping, and case retain their own data preparation and delegate reusable
+rendering downward: mapping reuses standard renderers, while case adapts its
+components and reuses mapping renderers. Defaults live in `config/plot.toml`.
+
 ## Independent resolutions
 
 The architecture treats the following choices as independent:

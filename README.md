@@ -190,10 +190,13 @@ resolved = parameter.resolve(
 figure = standard_manager.plot("network")
 same_figure = standard_data.plot("network")
 figures = standard_data.plot("resource", year=2024)
+english = standard_data.plot("network", language="en")
 ```
 
 plot接口只返回Figure，不主动display或保存。所有地图支持`map_crs`、
-`spatial_levels`和`china_inset`；完整中国范围自动使用南海插图。
+`spatial_levels`、`language="zh"/"en"`和`china_inset`。公共默认值在
+`config/plot.toml`中配置；完整中国范围默认使用右下角南海插图，省份、其他国家或区域不会
+误加该插图。每次调用传入的参数优先于配置文件。
 
 ## 时空映射层
 
@@ -291,8 +294,10 @@ figure = case_manager.plot("network")
 same_figure = case.plot("network")
 ```
 
-三层绘图统一由`src.plot`分派，manager和数据对象都使用
-`plot(dataset_id, **kwargs)`；各层只保留自身的数据准备差异。`case_manager`会缓存完整case，
+三层绘图统一由`src.visualization`配置和分派，manager和数据对象都使用
+`plot(dataset_id, **kwargs)`。`visualization`管理语言、字体、投影和公共入口；standard准备
+标准对象和基础地图，mapping增加cell聚合与饼图，case只适配算例对象并复用mapping绘图。
+`case_manager`会缓存完整case，
 避免连续绘图时重复打开大体量时序文件。Notebook展示后应调用`plt.close(figure)`；不用完整case
 时可调用`case_manager.close()`释放NetCDF句柄。
 

@@ -11,6 +11,8 @@ from matplotlib.patches import Patch
 import pandas as pd
 
 from ...standard.plot import CATEGORY_COLORS
+from ...visualization import configure_matplotlib, resolve_plot_settings
+from ...visualization.labels import class_label, text
 from .model import UnitCommitmentResult
 
 
@@ -32,9 +34,13 @@ def plot_dispatch(
     spatial_uids: str | Iterable[str] | None = None,
     figsize: tuple[float, float] = (12, 6),
     title: str | None = None,
+    language: str | None = None,
 ) -> Figure:
     """Plot load, class dispatch, storage charging, and load shedding."""
 
+    settings = resolve_plot_settings(language=language)
+    configure_matplotlib(settings)
+    language = settings.language
     prepared = prepare_dispatch_data(
         result,
         start=start,
@@ -64,7 +70,8 @@ def plot_dispatch(
     if not charging.empty:
         axis.fill_between(
             snapshots, 0, -charging_total,
-            color="#7666a8", alpha=0.55, label="storage charging",
+            color="#7666a8", alpha=0.55,
+            label=text("storage_charging", language),
         )
     axis.plot(snapshots, load, color="black", linewidth=1.35, zorder=5)
     axis.plot(
@@ -73,26 +80,32 @@ def plot_dispatch(
     )
     axis.axhline(0, color="#737c77", linewidth=0.55)
     axis.set(
-        title=title or "Power-system production simulation",
-        xlabel="Time",
-        ylabel="Power (MW)",
+        title=title or text("uc_title", language),
+        xlabel=text("time", language),
+        ylabel=text("power_mw", language),
     )
     axis.grid(axis="y", color="#d9dddb", linewidth=0.45, alpha=0.75)
     handles = [
             *[
-                Patch(facecolor=color, label=name)
+                Patch(
+                    facecolor=color,
+                    label=_dispatch_label(name, language),
+                )
                 for name, color in zip(positive.columns, colors, strict=True)
             ],
-            Line2D([], [], color="black", label="load"),
+            Line2D([], [], color="black", label=text("load", language)),
             Line2D(
                 [], [], color="#697277", linestyle="--",
-                label="load + storage charging",
+                label=text("load_storage", language),
             ),
         ]
     if not charging.empty:
         handles.insert(
             len(positive.columns),
-            Patch(facecolor="#7666a8", alpha=0.55, label="storage charging"),
+            Patch(
+                facecolor="#7666a8", alpha=0.55,
+                label=text("storage_charging", language),
+            ),
         )
     axis.legend(
         handles=handles,
@@ -190,3 +203,13 @@ def _color(name: str, index: int):
         base,
         plt.colormaps["tab20"](index % 20),
     )
+
+
+def _dispatch_label(name: object, language: str) -> str:
+    value = str(name)
+    if value.endswith(" discharge"):
+        return text(
+            "storage_discharge", language,
+            class_label=class_label(value.removesuffix(" discharge"), language),
+        )
+    return class_label(value, language)

@@ -49,7 +49,7 @@ class StandardData:
     def plot(self, dataset_id: str, **kwargs: object) -> object:
         """Plot one contained dataset through the shared plotting facade."""
 
-        from ..plot import plot
+        from ..visualization import plot
 
         return plot(self, dataset_id, **kwargs)
 

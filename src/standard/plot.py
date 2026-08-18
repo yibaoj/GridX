@@ -18,6 +18,7 @@ import xarray as xr
 
 from .geometry import polygonal_geometry
 from .model import StandardNetwork
+from ..visualization.labels import class_label, text
 
 
 PlotResult = Figure | dict[str, Figure]
@@ -66,32 +67,6 @@ CATEGORY_MARKERS = {
     "compressed_air_storage": "D",
     "thermal_storage": "^",
     "capacitor_storage": "P",
-}
-CATEGORY_LABELS_ZH = {
-    "bioenergy": "生物质",
-    "coal": "煤电",
-    "gas": "天然气",
-    "geothermal": "地热",
-    "nuclear": "核电",
-    "hydropower": "水电",
-    "solar": "光伏",
-    "wind": "风电",
-    "other": "其他",
-    "battery": "电化学",
-    "battery_storage": "电化学",
-    "pumped_hydro": "抽水蓄能",
-    "pumped_storage": "抽水蓄能",
-    "thermal_storage": "热储能",
-    "compressed_air": "压缩空气",
-    "compressed_air_storage": "压缩空气",
-    "capacitor_storage": "超级电容",
-    "onshore": "陆上风电",
-    "offshore_fixed": "海上风电",
-    "offshore_floating": "海上风电",
-    "offshore_unspecified": "海上风电",
-    "run_of_river": "径流水电",
-    "utility_scale_pv": "光伏",
-    "electric_load": "电力负荷",
 }
 NETWORK_VOLTAGE_COLORS = {
     110.0: "#56b4c6",
@@ -197,13 +172,22 @@ def map_axes(
 
 def _is_national_china(spatial: gpd.GeoDataFrame | None) -> bool:
     region = province_frame(spatial)
-    if region is None or len(region) < 30 or "adcode" not in region:
+    if region is None or len(region) < 30:
         return False
-    adcodes = set(region["adcode"].astype("string").dropna())
+    if "adcode" in region:
+        adcodes = set(region["adcode"].astype("string").dropna())
+    elif "uid" in region:
+        adcodes = set(
+            region["uid"].astype("string").str.extract(
+                r"(\d{6})$", expand=False
+            ).dropna()
+        )
+    else:
+        return False
     if not {"110000", "310000", "460000", "650000"}.issubset(adcodes):
         return False
     minx, miny, maxx, maxy = region.to_crs("EPSG:4326").total_bounds
-    return minx < 75 and miny < 10 and maxx > 130 and maxy > 50
+    return minx < 80 and miny < 25 and maxx > 130 and maxy > 50
 
 
 def _set_axis_extent(
@@ -279,6 +263,7 @@ def add_asset_legends(
     axis: plt.Axes,
     class_handles: list,
     capacity_reference: float,
+    language: str,
 ) -> None:
     """Add separate class-color and total-capacity legends to an asset map."""
 
@@ -289,7 +274,7 @@ def add_asset_legends(
         ncol=2,
         frameon=False,
         fontsize=8,
-        title="类别",
+        title=text("class", language),
     )
     axis.add_artist(class_legend)
     values = capacity_legend_values(capacity_reference)
@@ -313,15 +298,9 @@ def add_asset_legends(
         bbox_to_anchor=(0.095, 0.88),
         frameon=False,
         fontsize=8,
-        title="总容量",
+        title=text("total_capacity", language),
         labelspacing=0.8,
     )
-
-
-def class_label(value: object) -> str:
-    """Return the shared Chinese display label for a standardized class."""
-
-    return CATEGORY_LABELS_ZH.get(str(value), str(value).replace("_", " "))
 
 
 def prepare_population_plot(data: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -377,6 +356,7 @@ def prepare_timeseries_plot(
     year: int,
     class_name: str | None,
     quantity: str,
+    language: str,
 ) -> dict[str, tuple[gpd.GeoDataFrame, dict[str, object]]]:
     """Prepare annual class maps using the same aggregation for every renderer."""
 
@@ -388,19 +368,32 @@ def prepare_timeseries_plot(
     geometry = _xarray_geometry(data)
     prepared = {}
     for item in classes:
+        display_class = class_label(item, language)
         values = data[variable].sel(time=str(year), **{"class": item})
         if values.sizes.get("time", 0) == 0:
             raise ValueError(f"No {year} data are available for class={item!r}.")
         if quantity == "load":
             display = values.sum("time").compute().values / 1e6
-            label = f"{year} 年用电量（TWh）"
-            title = f"{class_label(item)}：{year} 年用电量"
+            label = text(
+                "load_label", language,
+                year=year, class_label=display_class,
+            )
+            title = text(
+                "load_title", language,
+                year=year, class_label=display_class,
+            )
             limits = (None, None)
             unit = "TWh"
         else:
             display = values.mean("time").compute().values
-            label = f"{year} 年平均容量因子（p.u.）"
-            title = f"{class_label(item)}：{year} 年平均容量因子"
+            label = text(
+                "resource_label", language,
+                year=year, class_label=display_class,
+            )
+            title = text(
+                "resource_title", language,
+                year=year, class_label=display_class,
+            )
             limits = (0.0, 1.0)
             unit = "p.u."
         frame = gpd.GeoDataFrame(
@@ -640,12 +633,13 @@ def timeseries_class_maps(
     quantity: str,
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
+    language: str = "zh",
 ) -> PlotResult:
     """Plot one map per class from a time-by-location dataset."""
 
     prepared = prepare_timeseries_plot(
         data, variable=variable, year=year, class_name=class_name,
-        quantity=quantity,
+        quantity=quantity, language=language,
     )
     figures = {}
     for item, (frame, metadata) in prepared.items():
@@ -700,6 +694,7 @@ def plot_spatial(
     *,
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
+    language: str = "zh",
     **_: object,
 ) -> Figure:
     """Plot standardized land and marine spatial units."""
@@ -720,7 +715,8 @@ def plot_spatial(
         draw_boundaries(axis, data, map_crs=map_crs, zorder=3)
         finish_map(
             axis,
-            f"Standard spatial units ({len(data):,})" if index == 0 else "",
+            text("standard_spatial", language, count=len(data))
+            if index == 0 else "",
         )
     return figure
 
@@ -731,6 +727,7 @@ def plot_network(
     spatial: gpd.GeoDataFrame | None = None,
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
+    language: str = "zh",
     **_: object,
 ) -> Figure:
     """Plot standardized branches and junction/station buses."""
@@ -773,10 +770,10 @@ def plot_network(
                 handles=[*branch_handles,
                     Line2D([0], [0], marker="o", linestyle="none",
                            color="#596267", markersize=4,
-                           label="Junction"),
+                           label=text("junction", language)),
                     Line2D([0], [0], marker="o", linestyle="none",
                            color="#d1495b", markersize=5,
-                           label="Station"),
+                           label=text("station", language)),
                 ],
                 loc="lower left",
                 bbox_to_anchor=(0.095, 0.015),
@@ -784,11 +781,10 @@ def plot_network(
             )
         finish_map(
             axis,
-            (
-                f"Standard network: {len(data.bus):,} buses, "
-                f"{len(data.branch):,} branches"
-                if index == 0 else ""
-            ),
+            text(
+                "standard_network", language,
+                buses=len(data.bus), branches=len(data.branch),
+            ) if index == 0 else "",
         )
     return figure
 
@@ -809,6 +805,7 @@ def asset_point_map(
     spatial: gpd.GeoDataFrame | None,
     map_crs: str,
     china_inset: bool | None,
+    language: str,
 ) -> Figure:
     """Plot point assets with class-specific colors and markers."""
 
@@ -822,7 +819,8 @@ def asset_point_map(
         marker = CATEGORY_MARKERS.get(item, "o")
         handles.append(Line2D(
             [0], [0], marker=marker, linestyle="none", markerfacecolor=color,
-            markeredgecolor="white", markersize=7, label=class_label(item),
+            markeredgecolor="white", markersize=7,
+            label=class_label(item, language),
         ))
     for axis_index, axis in enumerate(axes):
         draw_background(axis, spatial, map_crs=map_crs, zorder=0)
@@ -842,7 +840,7 @@ def asset_point_map(
             )
         draw_boundaries(axis, spatial, map_crs=map_crs, zorder=4)
         if axis_index == 0:
-            add_asset_legends(axis, handles, reference)
+            add_asset_legends(axis, handles, reference, language)
         finish_map(
             axis,
             f"{title} ({frame['_capacity'].sum() / 1000:,.1f} GW)"
@@ -857,11 +855,12 @@ def plot_generator(
     spatial: gpd.GeoDataFrame | None = None,
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
+    language: str = "zh",
     **_: object,
 ) -> Figure:
     return asset_point_map(
-        data, "capacity_mw", "Generator assets by class", spatial, map_crs,
-        china_inset,
+        data, "capacity_mw", text("standard_generator", language),
+        spatial, map_crs, china_inset, language,
     )
 
 
@@ -871,11 +870,12 @@ def plot_storage(
     spatial: gpd.GeoDataFrame | None = None,
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
+    language: str = "zh",
     **_: object,
 ) -> Figure:
     return asset_point_map(
-        data, "power_capacity_mw", "Storage assets by class", spatial, map_crs,
-        china_inset,
+        data, "power_capacity_mw", text("standard_storage", language),
+        spatial, map_crs, china_inset, language,
     )
 
 
@@ -885,6 +885,7 @@ def plot_population(
     spatial: gpd.GeoDataFrame | None = None,
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
+    language: str = "zh",
     **_: object,
 ) -> Figure:
     frame = prepare_population_plot(data)
@@ -892,8 +893,8 @@ def plot_population(
         frame,
         "_value",
         spatial=spatial,
-        title="Population by standardized source cell",
-        label="log10(人口 + 1)",
+        title=text("standard_population", language),
+        label=text("population_label", language),
         map_crs=map_crs,
         china_inset=china_inset,
     )
@@ -907,6 +908,7 @@ def plot_load(
     spatial: gpd.GeoDataFrame | None = None,
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
+    language: str = "zh",
     **_: object,
 ) -> PlotResult:
     return timeseries_class_maps(
@@ -918,6 +920,7 @@ def plot_load(
         quantity="load",
         map_crs=map_crs,
         china_inset=china_inset,
+        language=language,
     )
 
 
@@ -929,6 +932,7 @@ def plot_resource(
     spatial: gpd.GeoDataFrame | None = None,
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
+    language: str = "zh",
     **_: object,
 ) -> PlotResult:
     return timeseries_class_maps(
@@ -940,10 +944,16 @@ def plot_resource(
         quantity="resource",
         map_crs=map_crs,
         china_inset=china_inset,
+        language=language,
     )
 
 
-def plot_parameter(data: pd.DataFrame, **_: object) -> Figure:
+def plot_parameter(
+    data: pd.DataFrame,
+    *,
+    language: str = "zh",
+    **_: object,
+) -> Figure:
     """Plot parameter coverage by standardized asset class."""
 
     frame = data.loc[
@@ -955,8 +965,10 @@ def plot_parameter(data: pd.DataFrame, **_: object) -> Figure:
     image = axis.imshow(coverage, cmap=CONTINUOUS_CMAP, aspect="auto")
     axis.set_xticks(range(len(coverage.columns)), coverage.columns, rotation=60)
     axis.set_yticks(range(len(coverage.index)), coverage.index)
-    axis.set_title("Parameter coverage")
-    figure.colorbar(image, ax=axis, label="Parameter records")
+    axis.set_title(text("parameter_coverage", language))
+    figure.colorbar(
+        image, ax=axis, label=text("parameter_records", language)
+    )
     return figure
 
 

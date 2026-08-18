@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 import src.case.manager as case_manager_module
-import src.plot as plotting
+import src.visualization.api as plotting
 from src.case.manager import PowerSystemCaseManager
 from src.case.model import PowerSystemCase
 from src.mapping.model import MappedData
