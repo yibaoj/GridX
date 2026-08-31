@@ -13,35 +13,31 @@ transformer_statuses = ["operating", "operational", "active", "in_service", "in_
 converter_statuses = ["operating", "operational", "active", "in_service", "in_use"]
 bus_subclasses = ["station_bus"]
 
-[assets.generator]
+[generator]
 statuses = ["operating", "operational", "active", "in_service", "in_use"]
 minimum_capacity_mw = 10.0
 maximum_capacity_mw = 1000000.0
+mapping_method = "geometry"
+prefer_same_admin = true
+voltage_preference = "high"
+aggregate_by = "bus"
 
-[assets.storage]
+[storage]
 statuses = ["operating", "operational", "active", "in_service", "in_use"]
 minimum_capacity_mw = 10.0
 maximum_capacity_mw = 1000000.0
-
-[asset_bus_mapping.generator]
-method = "geometry"
+mapping_method = "geometry"
 prefer_same_admin = true
 voltage_preference = "high"
+aggregate_by = "bus"
 
-[asset_bus_mapping.storage]
-method = "geometry"
+[load]
+mapping_method = "geometry"
 prefer_same_admin = true
 voltage_preference = "high"
-
-[load_bus_mapping]
-method = "geometry"
-prefer_same_admin = true
-voltage_preference = "high"
+aggregate_by = "bus"
 
 [aggregation]
-generator = "bus"
-storage = "bus"
-load = "bus"
 sum_parameter_names = []
 boolean_parameter_names = ["committable", "cyclic_state_of_charge"]
 

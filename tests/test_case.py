@@ -3,6 +3,10 @@
 import numpy as np
 import pandas as pd
 from types import SimpleNamespace
+import tomllib
+import geopandas as gpd
+import pytest
+from shapely.geometry import LineString, MultiPolygon, Point, box
 import xarray as xr
 
 from src.app import UnitCommitmentApplication
@@ -10,6 +14,8 @@ from src.app.uc.manager import _optimize, _validate_dispatch
 from src.case.backends.manifest import load_pypsa_manifest
 from src.case.aggregate import aggregate_load
 from src.case.manager import _validate_load_profiles
+from src.case.plot import _prepare_case_load_points
+from src.case.remap import remap_assets, remap_load
 from src.case.time import select_time
 
 
@@ -78,6 +84,65 @@ def test_time_alignment_supports_coarse_and_fine_steps() -> None:
     }
     assert select_time(source, {**common, "time_step": "2h"}).sizes["time"] == 2
     assert select_time(source, {**common, "time_step": "30min"}).sizes["time"] == 5
+
+
+@pytest.mark.parametrize("geometry", [
+    Point(110, 35),
+    LineString([(110, 35), (111, 36)]),
+    MultiPolygon([box(110, 35, 111, 36), box(112, 35, 113, 36)]),
+])
+def test_case_load_points_use_bus_geometry_and_peak_power(geometry) -> None:
+    load = aggregate_load(_load(), "bus")
+    buses = gpd.GeoDataFrame(
+        {"uid": ["bus:1"]}, geometry=[geometry], crs="EPSG:4326"
+    )
+    case = SimpleNamespace(
+        load=load,
+        network=SimpleNamespace(bus=SimpleNamespace(data=buses)),
+    )
+
+    prepared = _prepare_case_load_points(
+        case, year=2024, class_name="industry", statistic="peak", language="en"
+    )
+    frame, metadata = prepared["industry"]
+
+    assert frame.at[0, "bus_uid"] == "bus:1"
+    assert frame.at[0, "_value"] == 18.0
+    assert frame.at[0, "geometry"].geom_type == "Point"
+    assert frame.at[0, "geometry"].equals(geometry.representative_point())
+    assert buses.at[0, "geometry"].equals(geometry)
+    assert metadata["unit"] == "MW"
+
+
+def test_case_object_config_blocks_support_asset_and_load_remapping() -> None:
+    with open("config/case.toml", "rb") as file:
+        config = tomllib.load(file)
+    cells = gpd.GeoDataFrame({
+        "spatial_uid": ["cell:a", "cell:b"], "admin_uid": ["admin:1"] * 2,
+    }, geometry=[Point(110, 35), Point(111, 35)], crs="EPSG:4326")
+    cells["centre_geometry"] = cells.geometry
+    buses = cells.iloc[:1].assign(
+        uid="bus:1", subclass="station_bus", voltage_kv=500.0
+    )
+    common = dict(
+        buses=buses, cells=cells, metric_crs=config["general"]["metric_crs"],
+        random_seed=config["general"]["random_seed"],
+        bus_subclasses=config["network"]["bus_subclasses"],
+    )
+    for dataset_id in ("generator", "storage"):
+        result = remap_assets(
+            cells.assign(uid=["asset:1", "asset:2"]),
+            dataset_id=dataset_id, options=config[dataset_id], **common,
+        )
+        assert result["bus_uid"].tolist() == ["bus:1", "bus:1"]
+        assert result["bus_mapping_method"].eq("geometry").all()
+        assert config[dataset_id]["aggregate_by"] == "bus"
+    load = remap_load(_load(), options=config["load"], **common)
+    assert load.bus_uid.values.tolist() == ["bus:1", "bus:1"]
+    assert aggregate_load(load, config["load"]["aggregate_by"]).sizes["uid"] == 1
+    assert set(config["aggregation"]) == {
+        "sum_parameter_names", "boolean_parameter_names"
+    }
 
 
 def test_pypsa_manifest_controls_units_and_fallbacks() -> None:

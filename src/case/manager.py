@@ -184,28 +184,28 @@ class PowerSystemCaseManager:
         }
         generator = remap_assets(
             _filter_assets(
-                mapped_data.generator, options["assets"]["generator"],
+                mapped_data.generator, options["generator"],
                 "capacity_mw",
             ),
             dataset_id="generator",
-            options=options["asset_bus_mapping"]["generator"],
+            options=options["generator"],
             **common,
         )
         storage = remap_assets(
             _filter_assets(
-                mapped_data.storage, options["assets"]["storage"],
+                mapped_data.storage, options["storage"],
                 "power_capacity_mw",
             ),
             dataset_id="storage",
-            options=options["asset_bus_mapping"]["storage"],
+            options=options["storage"],
             **common,
         )
         load = remap_load(
             select_time(mapped_data.load, options["time"]),
-            options=options["load_bus_mapping"],
+            options=options["load"],
             **common,
         )
-        resource = mapped_data.resource
+        resource = select_time(mapped_data.resource, options["time"])
         load_cells = load
         at = options["parameters"].get("at")
         parameters = {
@@ -236,23 +236,23 @@ class PowerSystemCaseManager:
         }
         generator, parameters["generator"], generator_membership = aggregate_assets(
             generator, parameters["generator"], dataset_id="generator",
-            method=str(aggregation["generator"]), **aggregate_options,
+            method=str(options["generator"]["aggregate_by"]), **aggregate_options,
         )
         storage, parameters["storage"], storage_membership = aggregate_assets(
             storage, parameters["storage"], dataset_id="storage",
-            method=str(aggregation["storage"]), **aggregate_options,
+            method=str(options["storage"]["aggregate_by"]), **aggregate_options,
         )
-        if aggregation["generator"] == "cell":
+        if options["generator"]["aggregate_by"] == "cell":
             generator = remap_assets(
                 generator, dataset_id="generator",
-                options=options["asset_bus_mapping"]["generator"], **common,
+                options=options["generator"], **common,
             )
-        if aggregation["storage"] == "cell":
+        if options["storage"]["aggregate_by"] == "cell":
             storage = remap_assets(
                 storage, dataset_id="storage",
-                options=options["asset_bus_mapping"]["storage"], **common,
+                options=options["storage"], **common,
             )
-        load = aggregate_load(load, str(aggregation["load"]))
+        load = aggregate_load(load, str(options["load"]["aggregate_by"]))
         network = CaseNetwork(
             bus=_component(network_data.bus, parameters["bus"]),
             branch=_component(network_data.branch, parameters["branch"]),
@@ -348,13 +348,13 @@ def _validate_case(
         "name": "common_timestamps",
         "status": (
             "pass"
-            if pd.Index(load.time.values).isin(resource.time.values).all()
+            if pd.Index(load.time.values).equals(pd.Index(resource.time.values))
             else "fail"
         ),
         "value": load.sizes["time"],
         "detail": (
-            f"{load.sizes['time']} load timestamps are covered by the "
-            f"{resource.sizes['time']}-timestamp resource series"
+            f"load_timestamps={load.sizes['time']}; "
+            f"resource_timestamps={resource.sizes['time']}"
         ),
     }, {
         "check": "aggregation_limit", "component": "generator",

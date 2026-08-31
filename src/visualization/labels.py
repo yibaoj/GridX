@@ -78,6 +78,16 @@ TEXT = {
     "time": {"zh": "时间", "en": "Time"},
     "power_mw": {"zh": "功率（MW）", "en": "Power (MW)"},
     "load": {"zh": "负荷", "en": "Load"},
+    "peak_load": {"zh": "峰值负荷", "en": "Peak load"},
+    "mean_load": {"zh": "平均负荷", "en": "Mean load"},
+    "case_load_peak_title": {
+        "zh": "{class_label}：母线峰值负荷（{start}至{end}）",
+        "en": "{class_label}: peak bus load ({start} to {end})",
+    },
+    "case_load_mean_title": {
+        "zh": "{class_label}：母线平均负荷（{start}至{end}）",
+        "en": "{class_label}: mean bus load ({start} to {end})",
+    },
     "storage_charging": {"zh": "储能充电", "en": "Storage charging"},
     "storage_discharge": {"zh": "{class_label}放电", "en": "{class_label} discharge"},
     "load_storage": {

@@ -251,6 +251,11 @@ standard和mapping使用相同plot API、投影、配色和图例规则。
 筛选电压、状态和容量，重建最大连通子图，复用mapping接口重新挂接generator、storage
 和load，解析参数，并按bus或cell聚合资产。
 
+`case.toml`中`[generator]`和`[storage]`各自集中配置状态/容量筛选、母线匹配和聚合，
+`[load]`配置负荷匹配和聚合。`mapping_method="geometry"`使用原始几何匹配母线
+（`"cell"`改用cell中心）；`aggregate_by="bus"`按母线聚合（也可选`"cell"`）。
+公共参数聚合规则仍放在`[aggregation]`，修改配置后用`build(overwrite=True)`重建算例。
+
 ```python
 from src.case import PowerSystemCaseManager
 
@@ -293,6 +298,9 @@ case绘图与standard/mapping保持相同API，只返回Figure：
 figure = case_manager.plot("network")
 same_figure = case.plot("network")
 ```
+
+generator/storage饼图按bus汇总，load圆面积表示bus负荷；绘图取bus geometry的代表点，
+保留原始几何不变。负荷图仅显示正负荷bus，不保证每个候选station bus都有负荷。
 
 三层绘图统一由`src.visualization`配置和分派，manager和数据对象都使用
 `plot(dataset_id, **kwargs)`。`visualization`管理语言、字体、投影和公共入口；standard准备
