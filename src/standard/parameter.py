@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
+import tomllib
 from typing import Iterable, Mapping
 
 import numpy as np
@@ -22,17 +23,11 @@ PARAMETER_OPTIONAL_COLUMNS = (
     "reference_url", "scenario", "selector_json", "source_name",
     "source_provider", "voltage_kv",
 )
-DEFAULT_QUALITY_ORDER = (
-    "official_observation",
-    "source",
-    "standard_type_proxy",
-    "derived",
-    "generic",
-    "interpolated",
-    "proxy",
-    "low",
-    "model_default",
-)
+# Keep the TOML as the single source of the default ranking.
+with (Path(__file__).resolve().parents[2] / "config/standard_data.toml").open("rb") as _file:
+    DEFAULT_QUALITY_ORDER = tuple(
+        tomllib.load(_file)["datasets"]["parameter"]["options"]["quality_order"]
+    )
 
 MATCHING_RULES = pd.DataFrame([
     {
@@ -819,10 +814,12 @@ def validate_parameter_data(
     data: pd.DataFrame,
     *,
     conflict_tolerance: float = 1e-6,
-    quality_order: Iterable[str] = DEFAULT_QUALITY_ORDER,
+    quality_order: Iterable[str] | None = None,
 ) -> ParameterValidationReport:
     """Check record validity, source coverage, and exact-scope conflicts."""
 
+    if quality_order is None:
+        quality_order = data.attrs.get("quality_order", DEFAULT_QUALITY_ORDER)
     issue_rows: list[dict[str, object]] = []
 
     def issue(
@@ -1056,12 +1053,14 @@ class _ParameterResolver:
         *,
         source_priority: Mapping[str, int] | None = None,
         name_aliases: Mapping[str, str] | None = None,
-        quality_order: Iterable[str] = DEFAULT_QUALITY_ORDER,
+        quality_order: Iterable[str] | None = None,
         conflict_tolerance: float = 1e-6,
     ) -> None:
         self.parameters = parameters
         self.source_priority = dict(source_priority or {})
         self.name_aliases = dict(name_aliases or {})
+        if quality_order is None:
+            quality_order = parameters.attrs.get("quality_order", DEFAULT_QUALITY_ORDER)
         self.quality_rank = {
             quality: rank for rank, quality in enumerate(quality_order)
         }

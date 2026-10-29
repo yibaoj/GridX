@@ -7,7 +7,11 @@ import pytest
 
 from src.standard.asset_mapping import _asset_in_scope
 from src.standard.base import _Standardizer
-from src.standard.parameter import ParameterData
+from src.standard.parameter import (
+    ParameterData,
+    _ParameterResolver,
+    validate_parameter_data,
+)
 
 
 def test_asset_scope_uses_common_country_and_canonical_status_filters() -> None:
@@ -90,6 +94,10 @@ def test_parameter_api_counts_and_resolves_one_or_many_assets() -> None:
 
 def test_parameter_match_result_identifies_decisive_rank() -> None:
     common = {
+        "capacity_min_mw": float("nan"),
+        "capacity_max_mw": float("nan"),
+        "is_derived": False,
+        "derivation": pd.NA,
         "name": "efficiency",
         "group": "technical",
         "unit": "p.u.",
@@ -141,6 +149,36 @@ def test_parameter_match_result_identifies_decisive_rank() -> None:
     assert preferred.loc[0, "match_rank"] == 3
     assert preferred.loc[0, "match_result"] == "priority"
     assert preferred.loc[0, "selected_parameter_uid"] == "generic:efficiency"
+
+    # Custom metadata must govern both public and lower-level entry points.
+    parameters.attrs["quality_order"] = ("generic", "source")
+    for resolved in (
+        parameters.resolve(asset, "efficiency", dataset_id="generator"),
+        _ParameterResolver(parameters).resolve(
+            asset, "efficiency", dataset_id="generator"
+        ),
+    ):
+        assert resolved.loc[0, "selected_parameter_uid"] == "generic:efficiency"
+    for resolved in (
+        parameters.resolve(
+            asset, "efficiency", dataset_id="generator",
+            quality_order=("source", "generic"),
+        ),
+        _ParameterResolver(
+            parameters, quality_order=("source", "generic")
+        ).resolve(asset, "efficiency", dataset_id="generator"),
+    ):
+        assert resolved.loc[0, "selected_parameter_uid"] == "official:efficiency"
+    assert parameters.attrs["quality_order"] == ("generic", "source")
+
+    parameters.loc[0, "quality"] = "local_observation"
+    parameters.attrs["quality_order"] = ("local_observation", "generic")
+    for report in (parameters.validate(), validate_parameter_data(parameters)):
+        assert not report.issues["code"].eq("unknown_quality").any()
+    report = validate_parameter_data(parameters, quality_order=("generic",))
+    assert report.issues["code"].eq("unknown_quality").any()
+    parameters.loc[0, "quality"] = "source"
+    parameters.attrs.clear()
 
     parameters.loc[1, ["value", "quality"]] = [0.42, "source"]
     equivalent = parameters.resolve(asset, "efficiency", dataset_id="generator")
