@@ -1,41 +1,98 @@
-# GridX
+# GridX（网探）
 
-本目录保存中国电力系统开放数据的获取、标准化、时空映射、可视化和算例实验代码。
-代码统一在conda环境`env-py313`中运行：
+GridX 将中国电力系统开放数据转换为可检查、可追溯的电力系统算例，并通过 PyPSA
+运行聚合机组的连续经济调度（UC/ED）。它覆盖数据获取、标准化、时空映射、算例组装、
+生产模拟、地图与只读网站展示。当前应用不包含逐机组二进制启停或 N-1/N-k 安全约束。
+
+## 从哪里开始
+
+- **第一次了解项目：** 先看下方五层架构与快速开始，再查看处理原理。
+- **已有生成数据：** 用 manager 的 `check()` 检查，再用 `load()` 读取；无需重新下载或求解。
+- **希望复现实验：** 从 `notebooks/test_layers.ipynb` 开始，各专题 notebook 用于深入探索。
+- **开发或修改代码：** 先阅读 [AGENTS.md](AGENTS.md)，其中集中保存构建与编程要求。
+
+## 五层架构与数据流
+
+```text
+raw → standard → mapping → case → application
+原始文件   规范数据    时空映射    系统算例    模型与结果
+```
+
+| 层 / 路径 | 作用 | 主要输出 |
+|---|---|---|
+| `src/raw/` | 按源目录获取并校验文件，不解释业务字段 | 原始文件、可用性报告 |
+| `src/standard/` | 适配异构字段、分类、标识与数据结构 | `StandardData`、`StandardNetwork` |
+| `src/mapping/` | 统一空间单元、时间轴及母线挂接 | `MappedData`，包括参数表 |
+| `src/case/` | 选择范围、重挂接、匹配参数、聚合与校验 | 后端无关的 `PowerSystemCase` |
+| `src/app/` | 构建目标与约束、求解并整理结果 | `UnitCommitmentResult` |
+
+层间传递显式对象。case 只需完整 mapped data；应用只需 case。共享的
+`src/visualization/` 管理绘图入口、语言、字体、投影与图例；`src/web/` 展示离线生成载荷。
+空间单元用于索引和汇总，共处一个 cell 不代表电气连通，电气连通由设备端点决定。
+资源空间分辨率、电气网络分辨率、机组聚合粒度、时间与场景口径可分别选择；更改后需要
+重建受影响的映射或算例。代表日、不等步长等设想不应视为当前已经实现的应用功能。
+
+## 快速开始
+
+以下命令和 Python 示例均从 **GridX 仓库根目录**运行。
 
 ```bash
 conda activate env-py313
 ```
 
-## 编程规则
+先确认该环境具备处理所需数据的依赖：GeoPandas、pandas、xarray，以及运行调度所需的
+PyPSA、Linopy 和 HiGHS。OSM 预处理另需配置中的工具；ERA5 获取需要 CDS 许可与凭据。
+本节沿用项目已有环境，不提供未经验证的一键安装流程。
 
-1. 关键对象使用稳定且语义明确的名称；局部中间变量以`_`开头。
-2. 重复处理集中为函数或模块，不在多个notebook复制实现。
-3. `lines/substations`表示原始OSM对象，`segments/terminals/nodes`表示GIS处理中间对象；
-   `bus/branch/transformer/converter`表示标准化后的电气网络。
-4. 原始输入、配置和生成结果分别放在`data/`、`config/`和`outputs/`。
-5. 修改后在`env-py313`中重建相关dataset并检查schema、守恒关系和拓扑完整性。
+```python
+from src.raw import RawDataManager
+from src.standard import StandardDataManager
+from src.mapping import SpatiotemporalMappingManager
+from src.case import PowerSystemCaseManager
+from src.app import UnitCommitmentApplication
 
-项目级Codex规则见`AGENTS.md`。
+raw = RawDataManager()
+print(raw.check())                         # 查看缺少哪些来源
+# raw.prepare()                           # 准备来源；部分来源需按报告人工获取
+standard = StandardDataManager("config/standard_data.toml", raw_data=raw)
+print(standard.check())
+# 原始输入就绪后，依次执行：
+standard.build()
+mapping = SpatiotemporalMappingManager("config/mapping.toml", standard)
+mapping.build()
+case_manager = PowerSystemCaseManager("config/case.toml", mapped_data=mapping)
+case_manager.build()
+case = case_manager.load()
+print(case.validation)                    # 先检查参数和数据覆盖
+network = case.to_pypsa(strict=True)        # 必需参数存在缺口时拒绝转换
+# 修复 validation 中的缺口后再运行：
+application = UnitCommitmentApplication(case, "config/uc.toml")
+# result = application.run()
+# result = application.load()              # 只分析已有结果
+```
 
-## 代码结构
+`build()` 返回报告，`load()` 返回数据对象。已有输出默认复用；修改 case 配置后用
+`case_manager.build(overwrite=True)` 重建。仅检查网络可用 `case_manager.load("network")`，
+母线数量为 `len(case.network.bus.data)`。完整 `load()` 还会打开负荷与资源时序。
 
-| 路径 | 作用 |
+## 配置与输出速查
+
+| 文件 / 目录 | 用途 |
 |---|---|
-| `src/raw/` | 下载、定位和校验原始source |
-| `src/standard/` | 将异构source转换为稳定dataset |
-| `src/mapping/` | 统一空间单元、时间轴及电气母线映射 |
-| `src/case/` | 构建后端无关算例并适配PyPSA等求解框架 |
-| `src/app/` | 基于PowerSystemCase运行UC/ED等应用并整理结果 |
-| `src/web/` | 只读展示standard/mapping/case/application预生成结果 |
-| `config/raw_data_sources.csv` | 原始数据URL、规范本地路径和下载选项 |
-| `config/standard_data.toml` | dataset依赖及标准化参数 |
-| `config/class_mapping.csv` | generator/storage的有序分类规则 |
-| `config/mapping.toml` | 空间单元、重映射和节点匹配参数 |
-| `config/case.toml` | 算例筛选、聚合、时间和后端参数 |
-| `notebooks/` | 各层公共API、探索验证和应用示例 |
+| `config/raw_data_sources.csv` | 来源 URL、版本、规范本地路径及获取选项 |
+| `config/standard_data.toml` | 标准 dataset、source adapter 与参数质量排序 |
+| `config/class_mapping.csv` | 资产分类规则 |
+| `config/mapping.toml` | 空间单元、时间对齐、负荷下推与母线匹配 |
+| `config/case.toml` | 电压、状态、容量、聚合、时段及后端选择 |
+| `config/pypsa_parameter_manifest.toml` | 参数单位、后端属性、转换和 fallback 契约 |
+| `config/uc.toml` | 应用时间范围、连续模式、滚动窗口与求解器 |
+| `config/plot.toml`、`config/web.toml` | 绘图和网站输出配置 |
+| `data/` | 原始输入及配置声明的派生预处理缓存 |
+| `outputs/{standard,mapping,case}/` | 各层持久化数据与校验结果 |
+| `outputs/app/uc/` | 调度时序和求解摘要 |
+| `outputs/web/` | 网站只读载荷 |
 
-`notebooks/`中的实验文件保留探索过程与demo；可复用数据流程以`src/`模块为准。
+## 各层接口与处理原理
 
 ## 原始数据层
 
@@ -343,8 +400,7 @@ case的七类公共数据写入唯一目录`outputs/case/`；`load(dataset_id)`�
 时序、求解状态及摘要；从磁盘恢复时network不再反序列化，但绘图和结果分析所需的调度、
 SOC、潮流、可用的启停变量和节点边际电价均保存在NetCDF中。
 `solve_mode="rolling_horizon"`按配置窗口顺序求解并传递储能SOC。500 kV+全国网络适合
-算例检查，但日/周交互展示应使用已说明分辨率的应用算例；当前验证结果采用900 kV+
-筛选后的1,000 kV交流最大连通网。
+算例检查，但日/周交互展示应使用已说明分辨率的应用算例；实际电压阈值、时间范围和求解窗口以当前配置为准。
 
 ## Notebook与应用
 
@@ -353,7 +409,7 @@ SOC、潮流、可用的启停变量和节点边际电价均保存在NetCDF中�
 - `notebooks/load_exp.ipynb`：省级逐时负荷、人口权重和station负荷。
 - `notebooks/cf_exp.ipynb`：ERA5风光水资源可用率。
 - `notebooks/uc_exp.ipynb`：PyPSA一日UC demo，不含N-1/N-k安全约束。
-- `LOAD_WEIGHTING.md`：工业、人口和夜间灯光组合负荷权重方案。
+- `notebooks/test_layers.ipynb`：五层接口、case 到 PyPSA 的映射及实际优化模型检查。
 
 GridX（网探）网站只读取`outputs/web/`中的离线绘图数据。先调用与后端plot共享的准备
 函数生成压缩GeoJSON和图例元数据，再启动只读服务：
@@ -381,6 +437,149 @@ case层resource与mapping层相同，服务端直接复用mapping载荷，不生
 - 当前transformer/converter和部分generator/storage参数覆盖不足，正式仿真应采用
   `strict=True`并先解决`case.validation`中的失败项。
 - 正式地图应遵守自然资源部地图管理要求。
+
+## 负荷空间下推：基线与扩展方案
+
+以下保留原负荷研究说明中的公式、候选数据和实施顺序。人口/辅助量守恒下推是现有基线；
+行业组合、城市电量校准和动态权重是扩展方案，不代表标准流程已实现。探索 notebook 的
+WorldPop 单元与模块化 mapping 的目标 cell 可能不同，实际口径以配置及输出元数据为准。
+
+### 1. 目的与当前基线
+
+`notebooks/load_exp.ipynb`读取2015-2024年31省逐时合成负荷，并把省级负荷下推到
+WorldPop空间单元，再映射到同省最近的OSM变电站。当前人口权重为：
+
+\[
+w^{pop}_{g,p} =
+\frac{Pop_g}{\sum_{j\in p} Pop_j},
+\qquad
+L_{g,t}=L_{p,t}w^{pop}_{g,p}
+\]
+
+其中，\(g\)为省\(p\)内网格，\(t\)为小时。该方法透明且逐时守恒，但所有网格
+在全年使用固定份额，容易低估人口少、工业或商业用电高的地区。
+
+### 2. 分行业组合权重
+
+建议把居民、工业、商业及其他负荷分别构造空间代理：
+
+\[
+q_{g,t}=\sum_{s\in S}E_{p,s}h_{s,t}z_{g,s}
+\]
+
+\[
+L_{g,t}=L_{p,t}
+\frac{q_{g,t}}{\sum_{j\in p}q_{j,t}}
+\]
+
+- \(E_{p,s}\)：省\(p\)行业\(s\)的年/月度用电量或占比；
+- \(h_{s,t}\)：行业典型逐时负荷曲线，按研究时段归一化；
+- \(z_{g,s}\)：行业空间代理，在省内按行业归一化；
+- 分母使任意小时都满足\(\sum_{g\in p}L_{g,t}=L_{p,t}\)。
+
+推荐空间代理：
+
+| 行业 | 主要代理 | 辅助代理 |
+|---|---|---|
+| 居民 | WorldPop人口 | 住宅建成区、居民POI |
+| 商业/公共服务 | VIIRS夜间灯光 | 商业建成区、第三产业企业和POI |
+| 工业 | 工业企业数量或制造业企业网格 | OSM工业用地、工业园区、工业夜间灯光 |
+| 农业及其他 | 农业用地、乡村人口 | 行业统计和典型曲线 |
+
+为减弱极端亮度、企业注册地址聚集和OSM漏绘，可对代理采用
+`log1p`或分位数截尾，再在省内归一化。例如：
+
+\[
+z_{g,ind} =
+\operatorname{normalize}_p
+\left[
+\alpha \log(1+Firm^{ind}_g)
++\beta \sqrt{Area^{ind}_g}
++\gamma \log(1+NTL_g)
+\right]
+\]
+
+系数不宜凭经验固定。优先使用已有1 km用电栅格或市级行业电量拟合；数据不足时
+进行人口法、人口+夜光法和完整行业法三组敏感性分析。
+
+### 3. 可用原始数据
+
+#### 3.1 省级逐时总量
+
+- [2015-2024年中国省级逐时负荷数据论文](https://doi.org/10.1038/s41597-026-07327-8)
+- [Figshare工作簿](https://doi.org/10.6084/m9.figshare.29832701)
+
+工作簿中每年对应`YYYY load curve`，单位为每小时间隔的GWh。它提供省级时间
+边界条件，不提供省内空间结构或行业曲线。
+
+#### 3.2 人口、夜间灯光和土地利用
+
+- [WorldPop中国人口栅格](https://hub.worldpop.org/geodata/summary?id=29818)：
+  约1 km人口计数，用于居民负荷基线。
+- [VIIRS Nighttime Lights](https://eogdata.mines.edu/products/vnl/)：
+  约500 m月度/年度夜间辐亮度。使用月度产品时必须结合无云观测次数，不能把
+  缺测像元直接视为零。
+- [ESA WorldCover](https://esa-worldcover.org/en/data-access)：
+  10 m全球土地覆盖，可识别建成区，但不能直接区分住宅、商业与工业。
+- [OSM `landuse=industrial`](https://wiki.openstreetmap.org/wiki/Tag:landuse%3Dindustrial)：
+  可计算工业用地面积；不同城市的完整度不一致，应作为辅助变量。
+
+#### 3.3 企业和经济活动
+
+- [中国网格企业数据GED](https://doi.org/10.1038/s41597-020-00792-9)：
+  基于约2550万条企业注册记录，提供2005-2015年、0.01度网格的企业总数、状态
+  和行业分类。它能区分第二、第三产业空间结构，但年份较旧、注册地址不一定等于
+  实际生产地址，且缺少企业规模和用电量。
+- 省级/城市分行业电量可来自中国电力统计年鉴及地方统计年鉴，用于校准
+  \(E_{p,s}\)，而不直接用于网格定位。
+
+### 4. 两套城市用电数据
+
+#### 4.1 280城市1 km月度用电栅格
+
+- [数据下载与说明](https://doi.org/10.6084/m9.figshare.25398559)
+- 覆盖2012年4月至2019年12月，共93个月；
+- GeoTIFF格式、Albers等面积投影、1 km网格，覆盖280个城市。
+
+这是当前空间下推最有帮助的数据。推荐用途：
+
+1. 在覆盖城市内直接用其2019年或多年同月平均空间份额替代纯人口份额；
+2. 用2024年VIIRS、建成区和企业变化更新2019空间模板；
+3. 用它训练人口、夜光、工业用地和企业变量到网格电量的模型；
+4. 最终仍缩放到省级逐时负荷，确保逐时守恒。
+
+限制是时间止于2019年，数据本身也是估计产品而非电网量测，不能当作2024年真实
+变电站负荷。
+
+#### 4.2 296城市日度/月度用电数据
+
+- [论文与数据说明](https://doi.org/10.1038/s41597-025-06256-2)
+- 覆盖2022年296个地级及以上城市；
+- 提供日度和月度城市总量，并非城市内部空间栅格；
+- 使用国家、省、市统计、VIIRS日度夜光和气象变量估计。
+
+推荐把它用于“省-城市-网格”三级约束：
+
+1. 省级逐时负荷先按城市月度/日度份额分解到城市；
+2. 城市内部再使用1 km用电栅格或行业组合权重分解；
+3. 小时尺度仍来自省级曲线与行业典型曲线。
+
+它可改善省内城市间差异和日度季节变化，但不能单独确定城市内部网格位置，也不能
+直接恢复小时级变电站负荷。
+
+### 5. 推荐实施顺序
+
+1. **基线：** WorldPop静态权重，完成逐时守恒和站点映射。
+2. **空间增强：** 对280城市使用1 km月度用电栅格，其他地区使用人口+VIIRS。
+3. **行业增强：** 加入GED行业企业、OSM工业用地、WorldCover建成区和省级
+   分行业电量。
+4. **时间增强：** 引入居民、工业、商业典型曲线；用296城市数据校准城市日/月
+   份额。
+5. **验证：** 对比市级年度/月度统计、变电站已知峰值或地方电网典型日，并报告
+   不同权重方案下的节点负荷和线路潮流敏感性。
+
+人口、夜光、企业和用电栅格均为代理数据。最终结果应标注为“空间下推的合成节点
+负荷”，不能表述为电网企业公开的真实变电站量测。
 
 ## 参考
 

@@ -2,11 +2,11 @@
 output_root = "outputs/app/uc"
 strict_case = false
 commitment_mode = "continuous"
-default_start = "2024-07-15 00:00"
-default_end = "2024-07-21 23:00"
+default_start = "2024-05-01 00:00"
+default_end = "2024-08-31 23:00"
 dispatch_tolerance_mw = 0.001
-solve_mode = "rolling_horizon"
-rolling_horizon_hours = 4
+solve_mode = "single" # "rolling_horizon"
+rolling_horizon_hours = 12
 rolling_overlap_hours = 0
 
 [reliability]
