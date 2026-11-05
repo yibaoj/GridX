@@ -32,17 +32,49 @@ raw → standard → mapping → case → application
 资源空间分辨率、电气网络分辨率、机组聚合粒度、时间与场景口径可分别选择；更改后需要
 重建受影响的映射或算例。代表日、不等步长等设想不应视为当前已经实现的应用功能。
 
-## 快速开始
+## 安装与快速开始
 
-以下命令和 Python 示例均从 **GridX 仓库根目录**运行。
+当前推荐 **64 位 Python 3.13**（开发环境为 3.13.11），macOS 或 Windows。
+Python 3.11 是代码使用 `tomllib` 的最低语法/标准库门槛，不代表本项目已验证其依赖组合。
+PyPSA 后端契约要求 **1.2.x**，依赖文件固定为 1.2.4。Windows 安装尚未实机验证。
+
+先安装 [Miniconda](https://docs.conda.io/en/latest/miniconda.html) 和
+[Git](https://git-scm.com/downloads)，Mac 使用 Terminal，Windows 使用 Miniconda Prompt。
+以下命令两者通用；也可下载仓库 ZIP，解压后进入包含 `requirements.txt` 的目录。
 
 ```bash
+git clone https://github.com/yibaoj/GridX.git
+cd GridX
+conda create -n env-py313 python=3.13 pip -y
 conda activate env-py313
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip check
+python -c "from src.case import PowerSystemCaseManager; import pypsa; print(pypsa.__version__)"
+python -m ipykernel install --user --name env-py313 --display-name "GridX (Python 3.13)"
+jupyter lab
 ```
 
-先确认该环境具备处理所需数据的依赖：GeoPandas、pandas、xarray，以及运行调度所需的
-PyPSA、Linopy 和 HiGHS。OSM 预处理另需配置中的工具；ERA5 获取需要 CDS 许可与凭据。
-本节沿用项目已有环境，不提供未经验证的一键安装流程。
+在 Jupyter 中选择 **GridX (Python 3.13)** kernel，打开 `notebooks/test_layers.ipynb`。
+当前项目从源码目录运行，尚无 `pyproject.toml`/安装包入口；无需执行 `pip install .`。
+`requirements.txt` 固定 Python 直接依赖，含 notebook 工具；它不是跨平台完整锁文件。
+建议新建干净环境，不要对已有 Conda GIS 环境反复用 pip 覆盖安装。
+
+安装 Python 包不包含原始数据、下载许可和系统命令行工具：
+
+- **已有预处理结果：** 可直接按下方接口加载与分析。
+- **从 OSM PBF 开始：** `prepare_osm_power_network.sh` 另需 Bash、`osmium` 和
+  `ogr2ogr`（GDAL）。可在单独的工具环境执行
+  `conda create -n gridx-osm -c conda-forge --strict-channel-priority osmium-tool gdal -y`，
+  在 Bash 中设置 `CONDA_ENV_NAME=gridx-osm` 再运行该脚本；Windows 的此预处理步骤建议使用
+  WSL，在 WSL 内安装 Conda 和工具，不能直接在原生 Prompt 运行 `.sh`。
+- **ERA5：** 需接受 CDS 数据许可并按源目录要求配置 `~/.cdsapirc`。
+
+若 pip 找不到某个固定版本或该平台的二进制 wheel，先核对 Python/CPU 架构；
+不要在尚未验证时直接删掉全部版本约束。[GeoPandas 安装说明](https://geopandas.org/en/stable/getting_started/install.html)
+提供了 GIS 二进制依赖和 Conda 替代安装建议。
+
+下面的 Python 示例从 **GridX 仓库根目录**运行；输入数据就绪后再构建和求解。
 
 ```python
 from src.raw import RawDataManager

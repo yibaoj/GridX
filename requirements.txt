@@ -1,3 +1,5 @@
+# Python 3.13; direct dependency pins, not a cross-platform lockfile.
+# Install into a clean environment: python -m pip install -r requirements.txt
 pandas==3.0.3
 openpyxl==3.1.5
 numpy==2.5.0
@@ -20,3 +22,7 @@ atlite==0.4.1
 cdsapi==0.7.7
 cfgrib==0.9.15.1
 eccodes==2.46.0
+
+# Notebook interface
+jupyterlab==4.5.9
+ipykernel==7.2.0
