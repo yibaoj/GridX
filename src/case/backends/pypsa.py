@@ -29,22 +29,25 @@ def to_pypsa(case: PowerSystemCase, *, strict: bool | None = None):
             f"Parameter manifest targets PyPSA {manifest.pypsa_version}.x, "
             f"but {pypsa.__version__} is installed."
         )
-    backend_gaps = (
-        case.validation["check"].eq("backend_parameter_manifest")
-        & case.validation["required"].fillna(False)
-        & ~case.validation["status"].isin(["pass", "not_applicable"])
+    components = {
+        "bus": case.network.bus, "branch": case.network.branch,
+        "transformer": case.network.transformer, "converter": case.network.converter,
+        "generator": case.generator, "storage": case.storage,
+    }
+    backend_validation = manifest.validate(
+        {name: component.parameter for name, component in components.items()},
+        {name: component.data for name, component in components.items()},
     )
+    backend_gaps = backend_validation["required"].fillna(False) & ~backend_validation["status"].isin(["pass", "not_applicable"])
     other_gaps = (
-        case.validation["check"].isin(
-            ["resource_profile_coverage", "load_profile_coverage", "time_alignment"]
-        )
+        case.validation["check"].isin(["resource_profile_coverage", "load_profile_coverage", "time_alignment"])
         & case.validation["status"].eq("fail")
     )
-    failures = case.validation.loc[backend_gaps | other_gaps]
+    failures = pd.concat([backend_validation.loc[backend_gaps], case.validation.loc[other_gaps]], ignore_index=True)
     if not failures.empty:
         message = (
             f"PyPSA readiness has {len(failures)} required fallback or failed checks; "
-            "inspect case.validation for component-level details."
+            "inspect backend validation and case.validation for component-level details."
         )
         if strict:
             raise ValueError(message)
@@ -52,6 +55,7 @@ def to_pypsa(case: PowerSystemCase, *, strict: bool | None = None):
 
     network = pypsa.Network()
     network.set_snapshots(pd.DatetimeIndex(case.load.time.values))
+    network.snapshot_weightings.loc[:, :] = _time_step_hours(case)
     _add_carriers(network, case, manifest)
     _add_buses(network, case)
     _add_branches(network, case, manifest)
@@ -60,8 +64,11 @@ def to_pypsa(case: PowerSystemCase, *, strict: bool | None = None):
     _add_generators(network, case, manifest)
     _add_storage(network, case, manifest)
     _add_load(network, case)
+    from .interface import add_interfaces
+    add_interfaces(network, case.interface)
     network.meta = {
         "case_validation": case.validation.to_dict("records"),
+        "backend_validation": backend_validation.to_dict("records"),
         "parameter_complete": failures.empty,
         "case_backend": "pypsa",
         "aggregation_note": (

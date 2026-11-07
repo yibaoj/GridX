@@ -13,8 +13,9 @@ import pandas as pd
 
 from ..mapping import MappedData, SpatiotemporalMappingManager
 from ..standard import StandardNetwork
+from .region import select_region, largest_internal_network
+from .interface import build_interface, empty_interface, interface_capacities
 from .aggregate import aggregate_assets, aggregate_load
-from .backends.manifest import load_pypsa_manifest
 from .io import CASE_DATASETS, case_outputs, load_case, load_case_dataset, save_case
 from .model import CaseComponent, CaseNetwork, PowerSystemCase
 from .network import filter_network
@@ -169,9 +170,44 @@ class PowerSystemCaseManager:
             if self.mapped_data is not None
             else self.mapping_manager.load()
         )
+        mapped_data, boundary = select_region(mapped_data, options.get("spatial", {}))
         network_data, branch_mapping = filter_network(
-            mapped_data.network, options["network"]
+            mapped_data.network, options["network"], largest=boundary is None
         )
+        interface = empty_interface(network_data.bus.crs)
+        region_report = []
+        if boundary is not None:
+            mode = options["spatial"].get("boundary_mode", "closed")
+            if mode not in {"closed", "interface"}:
+                raise ValueError("spatial.boundary_mode must be closed or interface.")
+            inside = set(network_data.bus.loc[
+                network_data.bus.geometry.representative_point().covered_by(boundary), "uid"])
+            crossing = network_data.branch.loc[
+                network_data.branch.from_bus_uid.isin(inside)
+                ^ network_data.branch.to_bus_uid.isin(inside)].copy()
+            if not inside:
+                raise ValueError("No eligible electrical buses inside the selected region.")
+            connections = [frame.loc[frame.from_bus_uid.isin(inside) & frame.to_bus_uid.isin(inside)].copy()
+                           for frame in (network_data.branch, network_data.transformer, network_data.converter)]
+            network_data = largest_internal_network(StandardNetwork(
+                network_data.bus.loc[network_data.bus.uid.isin(inside)].copy(), *connections))
+            retained = set(network_data.bus.uid)
+            region_report = [dict(check="spatial_connectivity", component="network", name="discarded_internal_buses",
+                status="warning" if len(inside) != len(retained) else "pass",
+                value=len(inside)-len(retained), detail="Largest component selected before virtual interfaces are added.")]
+            for component in ("transformer", "converter"):
+                frame = getattr(mapped_data.network, component)
+                crossing_devices = int((frame.from_bus_uid.isin(inside) ^ frame.to_bus_uid.isin(inside)).sum())
+                region_report.append(dict(check="spatial_boundary", component=component,
+                    name="cross_boundary_station_devices", status="warning" if crossing_devices else "pass",
+                    value=crossing_devices, detail="Only branch crossings become interfaces; verify station boundary assignment."))
+            branch_mapping = branch_mapping.loc[branch_mapping.branch_uid.isin(network_data.branch.uid)].copy()
+            if mode == "interface":
+                crossing = crossing.loc[crossing.from_bus_uid.isin(retained) | crossing.to_bus_uid.isin(retained)]
+                resolved = resolve_parameters(crossing, mapped_data.parameter, dataset_id="network",
+                    component="branch", at=options["parameters"].get("at"))
+                capacity = interface_capacities(crossing, resolved)
+                interface = build_interface(crossing, retained, capacity, options["spatial"].get("interface", {}))
         cells = mapped_data.spatial
         common = {
             "buses": network_data.bus,
@@ -264,13 +300,11 @@ class PowerSystemCaseManager:
         )
         validation = _validate_case(
             network_data, generator, storage, load, load_cells,
-            mapped_data.population, resource, parameters,
-            load_pypsa_manifest(
-                options["backend"]["pypsa"]["parameter_manifest"]
-            ),
+            mapped_data.population, resource,
             generator_membership,
             dict(options["backend"]["pypsa"].get("resource_class_mapping", {})),
         )
+        validation = pd.concat([validation, pd.DataFrame(region_report)], ignore_index=True)
         save_case(PowerSystemCase(
             network=network,
             generator=CaseComponent(
@@ -285,6 +319,7 @@ class PowerSystemCaseManager:
             population=mapped_data.population,
             validation=validation,
             config=self.config,
+            interface=interface,
         ), self.output_root)
 
 
@@ -326,8 +361,6 @@ def _validate_case(
     load_cells,
     population: gpd.GeoDataFrame,
     resource,
-    parameters: dict[str, pd.DataFrame],
-    parameter_manifest,
     generator_membership: pd.DataFrame,
     resource_class_mapping: dict[str, str],
 ) -> pd.DataFrame:
@@ -366,12 +399,6 @@ def _validate_case(
             "clustered UC, not exact unit-level binary commitment."
         ),
     }]
-    assets = {
-        "bus": network.bus, "branch": network.branch,
-        "transformer": network.transformer, "converter": network.converter,
-        "generator": generator, "storage": storage,
-    }
-    coverage = parameter_manifest.validate(parameters, assets)
     variable = generator.loc[
         generator["class"].isin(["wind", "solar", "hydropower"])
     ]
@@ -399,7 +426,7 @@ def _validate_case(
         load, load_cells, network.bus, population
     )
     return pd.concat(
-        [pd.DataFrame(rows), coverage, resource_coverage, load_coverage],
+        [pd.DataFrame(rows), resource_coverage, load_coverage],
         ignore_index=True,
     )
 

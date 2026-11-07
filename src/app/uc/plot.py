@@ -161,6 +161,15 @@ def prepare_dispatch_data(
     load = data["load_p_set_mw"].sel(
         load_uid=load_uid
     ).to_pandas().fillna(0).sum(axis=1)
+    if "link_interface_direction" in data.coords:
+        for direction, bus_coordinate in (("import", "link_bus1"), ("export", "link_bus0")):
+            selected = data.link_uid.where(
+                (data.link_interface_direction == direction) & data[bus_coordinate].isin(list(buses)), drop=True)
+            exchange = data["link_p0_mw"].sel(link_uid=selected).sum("link_uid").to_pandas()
+            if direction == "import":
+                generation["imports"] = exchange
+            else:
+                load = load + exchange
     return {
         "snapshots": snapshots,
         "generation": generation,

@@ -119,6 +119,16 @@ def build_spatial_cells(
     result["geometry"] = result.geometry.map(polygonal_geometry)
     result["centre_geometry"] = centres.reset_index(drop=True)
     result = result.loc[:, columns]
+    # Keep administrative descriptions and provenance alongside the cell ID.
+    metadata_columns = [
+        column for column in spatial.columns
+        if column not in {"uid", "level", "geometry"}
+    ]
+    metadata = spatial[["uid", *metadata_columns]].rename(columns={
+        "uid": "admin_uid",
+        **{column: f"admin_{column}" for column in metadata_columns},
+    })
+    result = result.merge(metadata, on="admin_uid", how="left", validate="many_to_one")
     result.attrs.update({
         "mapping_dataset_id": "spatial",
     })

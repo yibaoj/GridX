@@ -19,6 +19,7 @@ import xarray as xr
 from .geometry import polygonal_geometry
 from .model import StandardNetwork
 from ..visualization.labels import class_label, text
+from ..visualization.network import filter_network_voltage
 
 
 PlotResult = Figure | dict[str, Figure]
@@ -445,23 +446,23 @@ def _single_voltage(value: object) -> float:
 
 def prepare_network_plot(
     data: StandardNetwork,
+    *,
+    minimum_voltage_kv: float | None = None,
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, dict[str, str]]:
     """Prepare discrete voltage/current branches and station/junction buses."""
 
-    branches = data.branch.copy()
+    buses, branches = filter_network_voltage(
+        data.bus, data.branch, minimum_voltage_kv=minimum_voltage_kv
+    )
     branches["_voltage_kv"] = branches["voltage_kv"].map(_single_voltage)
     branches["_current_type"] = (
         branches.get("current_type", pd.Series("AC", index=branches.index))
         .astype("string").str.upper().fillna("AC")
     )
-    branches["_style"] = branches.apply(
-        lambda row: (
-            f"{row['_voltage_kv']:g} kV {row['_current_type']}"
-            if np.isfinite(row["_voltage_kv"])
-            else f"Unknown kV {row['_current_type']}"
-        ),
-        axis=1,
-    )
+    branches["_style"] = [
+        f"{voltage:g} kV {current}" if np.isfinite(voltage) else f"Unknown kV {current}"
+        for voltage, current in zip(branches["_voltage_kv"], branches["_current_type"])
+    ]
     voltages = sorted(branches["_voltage_kv"].dropna().unique())
     fallback = plt.colormaps["tab20"](np.linspace(0, 1, max(len(voltages), 1)))
     voltage_colors = {
@@ -472,8 +473,8 @@ def prepare_network_plot(
         style: voltage_colors.get(float(group["_voltage_kv"].iloc[0]), "#7d8581")
         for style, group in branches.groupby("_style", observed=True)
     }
-    buses = data.bus.loc[
-        data.bus["subclass"].isin(["junction_bus", "station_bus"])
+    buses = buses.loc[
+        buses["subclass"].isin(["junction_bus", "station_bus"])
     ].copy()
     buses["_node_type"] = buses["subclass"].map({
         "junction_bus": "junction", "station_bus": "station",
@@ -728,12 +729,13 @@ def plot_network(
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
     language: str = "zh",
+    minimum_voltage_kv: float | None = None,
     **_: object,
 ) -> Figure:
     """Plot standardized branches and junction/station buses."""
 
     figure, axes = map_axes(spatial, china_inset=china_inset)
-    branches, buses, style_colors = prepare_network_plot(data)
+    branches, buses, style_colors = prepare_network_plot(data, minimum_voltage_kv=minimum_voltage_kv)
     branches = branches.to_crs(map_crs)
     buses = buses.to_crs(map_crs)
     buses["geometry"] = buses.geometry.representative_point()
@@ -783,7 +785,7 @@ def plot_network(
             axis,
             text(
                 "standard_network", language,
-                buses=len(data.bus), branches=len(data.branch),
+                buses=len(buses), branches=len(branches),
             ) if index == 0 else "",
         )
     return figure

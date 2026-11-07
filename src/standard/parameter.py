@@ -729,7 +729,7 @@ def _parameter_group(source_name: object) -> str:
         "minimum_down_time", "startup_time", "charging_efficiency",
         "discharging_efficiency", "standing_loss", "soc", "cyclic_",
         "efficiency", "lifetime", "capacity", "energy_to_power", "input",
-        "output", "temperature", "fill_level", "motor_size", "p_nom_ratio",
+        "output", "temperature", "fill_level", "motor_size", "p_nom_",
         "r_ohm", "x_ohm", "c_nf", "max_i", "q_mm2", "alpha", "i0_",
         "pfe_", "sn_", "vn_", "vk_", "vkr_", "tap_", "shift_",
         "nominal_voltage", "s_nom",

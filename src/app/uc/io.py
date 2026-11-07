@@ -48,7 +48,7 @@ def operation_dataset(
                 ("time", dimension), frame.to_numpy(dtype=float)
             )
             data[f"{component}_{output_name}"].attrs["unit"] = unit
-        for column in ("bus", "bus0", "bus1", "carrier"):
+        for column in ("bus", "bus0", "bus1", "carrier", "sign", "interface_direction", "source_uid"):
             if column in static:
                 data = data.assign_coords({
                     f"{component}_{column}": (

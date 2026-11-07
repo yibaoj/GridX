@@ -333,7 +333,9 @@ def plot_network(
     map_crs: str = DEFAULT_MAP_CRS,
     china_inset: bool | None = None,
     title: str | None = None,
+    title_key: str = "mapped_network",
     language: str = "zh",
+    minimum_voltage_kv: float | None = None,
     **_: object,
 ) -> Figure:
     """Plot the retained connected branches and junction/station buses."""
@@ -342,7 +344,9 @@ def plot_network(
     network = StandardNetwork(
         data.bus, data.branch, data.transformer, data.converter
     )
-    branches, buses, style_colors = prepare_network_plot(network)
+    branches, buses, style_colors = prepare_network_plot(
+        network, minimum_voltage_kv=minimum_voltage_kv
+    )
     branches = branches.to_crs(map_crs)
     buses = buses.to_crs(map_crs)
     buses["geometry"] = buses.geometry.representative_point()
@@ -394,8 +398,8 @@ def plot_network(
             (
                 title or (
                     text(
-                        "mapped_network", language,
-                        buses=len(data.bus), branches=len(data.branch),
+                        title_key, language,
+                        buses=len(buses), branches=len(branches),
                     )
                 )
                 if index == 0 else ""

@@ -4,7 +4,7 @@ metric_crs = "+proj=aea +lat_1=25 +lat_2=47 +lat_0=0 +lon_0=105 +datum=WGS84 +un
 random_seed = 42
 
 [network]
-minimum_voltage_kv = 750.0
+minimum_voltage_kv = 500.0
 maximum_voltage_kv = 2000.0
 missing_status_is_active = true
 bus_statuses = ["operating", "operational", "active", "in_service", "in_use"]
@@ -67,3 +67,16 @@ offshore_floating = "offshore_fixed"
 offshore_unspecified = "offshore_fixed"
 utility_scale_pv = "utility_scale_pv"
 run_of_river = "run_of_river"
+
+# Empty IDs preserve the complete mapped scope. IDs may identify cells or their admin regions.
+[spatial]
+spatial_uids = ["province_boundaries:370000"] # "province_boundaries:370000"
+boundary_mode = "interface" # closed / interface
+
+[spatial.interface]
+direction = "import" # import / export; one direction per case
+power_min_pu = 0.0
+power_max_pu = 1.0
+energy_min_pu = 0.0
+energy_max_pu = 1.0
+marginal_cost_eur_per_mwh = 50.0

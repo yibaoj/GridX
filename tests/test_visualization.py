@@ -53,3 +53,29 @@ def test_complete_china_adds_inset_but_other_regions_do_not() -> None:
     plt.close(china_figure)
     plt.close(case_figure)
     plt.close(region_figure)
+
+
+def test_network_voltage_filter_preserves_inputs_and_handles_empty_result():
+    from types import SimpleNamespace
+    from shapely.geometry import Point, LineString
+    from src.standard.plot import prepare_network_plot
+
+    buses = gpd.GeoDataFrame(
+        {"uid": ["a", "b", "c"], "voltage_kv": [500., 500., 220.],
+         "subclass": ["station_bus"] * 3},
+        geometry=[Point(0, 0), Point(1, 0), Point(2, 0)], crs="EPSG:4326",
+    )
+    branches = gpd.GeoDataFrame(
+        {"uid": ["ab", "bc"], "voltage_kv": [500., 220.],
+         "from_bus_uid": ["a", "b"], "to_bus_uid": ["b", "c"]},
+        geometry=[LineString([(0, 0), (1, 0)]), LineString([(1, 0), (2, 0)])],
+        crs="EPSG:4326",
+    )
+    network = SimpleNamespace(bus=buses, branch=branches)
+    lines, nodes, colors = prepare_network_plot(network, minimum_voltage_kv=500)
+    assert lines.uid.tolist() == ["ab"]
+    assert nodes.uid.tolist() == ["a", "b"]
+    assert set(colors) == {"500 kV AC"}
+    assert len(branches) == 2 and len(buses) == 3
+    lines, nodes, colors = prepare_network_plot(network, minimum_voltage_kv=1000)
+    assert lines.empty and nodes.empty and not colors

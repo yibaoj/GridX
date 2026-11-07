@@ -191,6 +191,7 @@ def test_pypsa_manifest_controls_units_and_fallbacks() -> None:
 def test_uc_list_marks_binary_commitment_inactive_in_continuous_mode() -> None:
     empty = SimpleNamespace(data=pd.DataFrame())
     case = SimpleNamespace(
+        interface=None,
         network=SimpleNamespace(
             branch=empty, transformer=empty, converter=empty
         ),

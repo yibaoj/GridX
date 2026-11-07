@@ -1,5 +1,8 @@
 # Downloaded source data and generated results
-data/
+data/*
+!data/parameter/
+data/parameter/*
+!data/parameter/model_assumptions.csv
 outputs/
 references/
 reports/

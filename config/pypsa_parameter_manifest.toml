@@ -54,9 +54,9 @@ selector = { current_type = "AC" }
 key = "branch_dc_p_nom"
 component = "branch"
 target = "Link.p_nom"
-name = "s_nom_mva_per_circuit"
-unit = "MVA/circuit"
-unit_factors = { "MVA/circuit" = 1.0 }
+name = "p_nom_mw_per_circuit"
+unit = "MW/circuit"
+unit_factors = { "MW/circuit" = 1.0 }
 formula = "p_nom = value * circuits"
 fallback = 2000.0
 required = true

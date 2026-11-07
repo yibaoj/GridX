@@ -53,6 +53,7 @@ class PowerSystemCase:
     population: gpd.GeoDataFrame
     validation: pd.DataFrame
     config: dict
+    interface: CaseComponent | None = None
 
     def plot(self, dataset_id: str, **kwargs: object) -> object:
         """Return one case-layer map without displaying or saving it."""

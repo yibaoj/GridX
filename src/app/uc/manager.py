@@ -202,10 +202,14 @@ def _optimize(
 ) -> tuple[str, str, float | None]:
     """Solve once or in chronological windows while preserving storage state."""
 
+    from ...case.backends.interface import interface_constraints
+
     optimize_options = {
         **kwargs,
         "include_objective_constant": False,
     }
+    if hasattr(network, "links") and network.links.carrier.eq("boundary_exchange").any():
+        optimize_options["extra_functionality"] = interface_constraints
     if solve_mode == "single":
         status, condition = network.optimize(
             snapshots=snapshots, **optimize_options

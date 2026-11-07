@@ -369,7 +369,7 @@ pypsa_network = case.to_pypsa(strict=False)
 
 `case.network`包含bus、branch、transformer和converter；每个静态组件均提供`.data`、
 `.parameter`和`.membership`。参数表保留`uid/name/group/value/unit`、命中规则和source
-溯源。`config/pypsa_parameter_manifest.toml`是validation和PyPSA adapter共享的唯一参数
+溯源。`config/pypsa_parameter_manifest.toml`是仅在PyPSA转换阶段使用的参数
 契约，记录目标属性、case参数名、规范/允许单位、转换公式、fallback、required和适用
 selector。`strict=True`拒绝required参数使用fallback；`strict=False`允许显式fallback并
 在PyPSA `meta`中记录缺口。fallback不再分散在adapter代码或`case.toml`中。
@@ -625,3 +625,62 @@ z_{g,ind} =
 - [pandapower standard types](https://pandapower.readthedocs.io/en/latest/std_types/basic.html)
 - [Dispa-SET](https://www.dispaset.eu/en/latest/data.html)
 - [中国标准地图服务](https://bzdt.ch.mnr.gov.cn/)
+
+## 按地域构建算例与边界交换
+
+`config/case.toml` 的 `[spatial]` 控制地域筛选。`spatial_uids = []` 不筛选；
+非空时支持 mapping cell 的 `spatial_uid` 或其 `admin_uid`，多个 ID 取并集。
+例如山东省可设置 `spatial_uids = ["province_boundaries:370000"]`。
+ID 必须存在于当前 mapping 输出；城市或其他层级未映射时需先调整 mapping 并重建，
+不会从名称或省级数据推断城市边界。cell 还保留带 `admin_` 前缀的行政区描述与溯源字段。
+
+```toml
+[spatial]
+spatial_uids = ["province_boundaries:370000"]
+boundary_mode = "interface" # closed 删除外部连接；interface 构造边界交换
+
+[spatial.interface]
+direction = "import" # import / export，每个算例统一方向
+power_min_pu = 0.0
+power_max_pu = 1.0
+energy_min_pu = 0.0
+energy_max_pu = 1.0
+marginal_cost_eur_per_mwh = 50.0
+```
+
+发电、储能按代表点落入所选 cell 并集筛选；负荷和资源按所选 cell 筛选。
+网络先应用状态、电压条件，再选真实内部母线的最大连通分量，最后生成边界虚拟设备；
+这些虚拟母线不会成为资产重新挂接的候选。被排除的内部母线数写入 `case.validation`。
+`closed` 同样保留研究范围内的负荷，再按现有规则重挂接，因此是主网简化算例。
+
+`case.interface` 与 generator/storage 相同，具有 `.data/.parameter/.membership`，
+可用 `case_manager.load("interface")` 单独读取，保存到 `outputs/case/interface/`。
+它记录原 branch UID、真实内部接入母线、虚拟外部母线、方向、额定容量及配置参数。
+接口以跨界 branch 为单位，不把仅几何穿越区域的过境线路视为接入，也不做工程通道合并。
+边界原线路不会同时作为 Line 与 Interface 重复添加。
+额定容量从已匹配的规范参数计算并乘回路数，不读取后端 manifest；AC 的 MVA 额定值沿用线性模型中的
+有功容量近似。未解析出有来源依据的容量时拒绝建立接口，不用默认容量冒充实测额定值。
+
+PyPSA 中，进口 Link 为外部→内部，出口为内部→外部；外部 Generator 出力均非负，
+进口 `sign=+1`，出口吸收设备 `sign=-1`。接口效率为 1，成本只计在 Link 上，单位 EUR/MWh；
+正值表示交换费用，负值可表达出口收入。该等值控制交换功率，不保留被删除外部 AC 网络的 KVL 耦合。
+
+功率限制为 `power_*_pu × rated_power_mw`；电量限制为
+`energy_*_pu × rated_power_mw × 当前求解窗口小时数`。
+`single` 对整个选定时段约束，`rolling_horizon` 对每个窗口独立约束，最后短窗口使用实际时长。
+默认 `[0,1]` 表示在额定范围内可调；不是电量跨窗口累计预算。上下界均须在 `[0,1]` 内，
+且功率与电量比例区间必须有交集。接口不支持双向交换，外部电源也不代表真实送端机组模型。
+
+修改配置后使用 `case_manager.build(overwrite=True)` 重建。旧 case 缺少 Interface 持久化文件时，
+`check()` 会报告不完整；直接加载旧完整 case 时仍允许 `interface=None`。
+
+### 直流通道容量假设
+
+`data/parameter/model_assumptions.csv` 中维护直流架空通道的
+`p_nom_mw_per_circuit`（MW/circuit），与交流 `s_nom_mva_per_circuit`（MVA/circuit）分离。
+当前 500/660/800/1100 kV 的通用双极容量假设分别为 3000/4000/8000/12000 MW，
+通过 `selector_json` 中的电压和 DC 类型条件匹配，质量标记为 `generic`。
+这些值参考 NEA 公布的工程实例，并推广为电压等级代理，不代表每条线路的已核实容量。
+一回路按完整双极通道计，不能直接用于单极/单导线建模；多段线路或重复通道仍需核实。
+该 CSV 是仓库维护的补充输入；修改后需重建 standard parameter、mapping parameter 和 case。
+Interface 仍拒绝缺失容量的 fallback；普通后端转换中的 fallback 行为保持不变。

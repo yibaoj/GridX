@@ -13,7 +13,7 @@ from .model import CaseComponent, CaseNetwork, PowerSystemCase
 
 CASE_DATASETS = (
     "spatial", "population", "load", "resource", "network", "generator",
-    "storage",
+    "storage", "interface",
 )
 
 
@@ -28,6 +28,8 @@ def save_case(case: PowerSystemCase, root: Path) -> None:
     _write_component(case.generator, root / "generator")
     _write_component(case.storage, root / "storage")
     _write_network(case.network, root / "network")
+    from .interface import empty_interface
+    _write_component(case.interface if case.interface is not None else empty_interface(), root / "interface")
     case.validation.to_parquet(root / "validation.parquet", index=False)
 
 
@@ -45,6 +47,7 @@ def load_case(root: Path, config: dict) -> PowerSystemCase:
         population=gpd.read_parquet(root / "population.parquet"),
         validation=pd.read_parquet(root / "validation.parquet"),
         config=config,
+        interface=_read_component(root / "interface") if (root / "interface/data.parquet").exists() else None,
     )
 
 
@@ -55,7 +58,7 @@ def load_case_dataset(root: Path, dataset_id: str, config: dict) -> object:
         raise KeyError(f"Unknown case dataset {dataset_id!r}; expected {CASE_DATASETS}.")
     if dataset_id == "network":
         return _read_network(root / "network")
-    if dataset_id in {"generator", "storage"}:
+    if dataset_id in {"generator", "storage", "interface"}:
         return _read_component(root / dataset_id)
     if dataset_id in {"load", "resource"}:
         if dataset_id == "resource":
@@ -72,7 +75,7 @@ def case_outputs(root: Path) -> tuple[Path, ...]:
         root / "spatial.parquet", root / "population.parquet",
         root / "load.nc", root / "resource.nc", root / "validation.parquet",
     ]
-    for dataset_id in ("generator", "storage"):
+    for dataset_id in ("generator", "storage", "interface"):
         paths.extend(
             root / dataset_id / name
             for name in ("data.parquet", "parameter.parquet", "membership.parquet")

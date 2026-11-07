@@ -33,6 +33,8 @@ def formulation_table(
         "storage": not case.storage.data.empty,
         "shedding": bool(config["reliability"]["enabled"]),
     }
+    has_interface = case.interface is not None and not case.interface.data.empty
+    has["link"] = has["link"] or has_interface
     extendable = any(
         bool(case.config["backend"]["pypsa"][name])
         for name in (
@@ -42,6 +44,16 @@ def formulation_table(
         )
     )
     rows = _rows(continuous=continuous, has=has, extendable=extendable)
+    if has_interface:
+        rows.append(dict(section="objective", item="exchange costs", symbol="C^{exchange}",
+            indices="interface,t", latex=r"\sum_{k,t} w_t c_k p_{k,t}",
+            description="Directional interface costs in EUR, charged on Link dispatch", active=True,
+            pypsa_names=""))
+        for bound in ("min", "max"):
+            rows.append(dict(section="interface constraints", item=f"window energy {bound}",
+                symbol="E", indices="interface,window", latex=r"E=\sum_t w_t p_t",
+                description="Directional exchange energy bounded relative to rated power times window hours",
+                active=True, pypsa_names=f"Interface-energy-{bound}"))
     table = pd.DataFrame(rows)
     table["realized"] = _realized(table, model)
     if sections is not None:

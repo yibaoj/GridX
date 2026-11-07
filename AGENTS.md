@@ -59,8 +59,8 @@
   electrical connectivity; use branch, transformer, and converter endpoints.
 - Keep mapped parameters unchanged. Construct cases only from mapped data and
   make applications consume the case without reading raw sources or mutating it.
-- Keep backend adapters under `src/case/backends/`. Share one unit-checked
-  parameter manifest between backend conversion and case validation; declare
+- Keep backend adapters under `src/case/backends/`. Use a unit-checked
+  parameter manifest only during backend conversion, never during case construction; declare
   required parameters and fallbacks there instead of scattering defaults.
 - Preserve asset-to-aggregate membership and parameter-selection provenance.
   Rebuild a coherent case bundle when any required output is missing; do not

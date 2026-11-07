@@ -88,13 +88,7 @@ def plot_case(
                 case.network.converter.data,
                 case.network.branch_mapping,
             )
-            kwargs.setdefault(
-                "title",
-                text(
-                    "case_network", language,
-                    buses=len(network.bus), branches=len(network.branch),
-                ),
-            )
+            kwargs.setdefault("title_key", "case_network")
             return plot_mapped_network(
                 network,
                 cells=cells,

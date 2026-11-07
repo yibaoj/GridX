@@ -21,7 +21,7 @@ def aggregate_assets(
 ) -> tuple[gpd.GeoDataFrame, pd.DataFrame, pd.DataFrame]:
     """Aggregate assets by bus/cell, class, and subclass."""
 
-    if method == "none":
+    if data.empty or method == "none":
         membership = pd.DataFrame({
             "source_uid": data["uid"], "aggregate_uid": data["uid"],
             "weight": 1.0,
