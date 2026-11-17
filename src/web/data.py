@@ -28,7 +28,11 @@ class WebDataService:
         """Return interface settings and the prebuilt data manifest."""
 
         self.visits += 1
-        manifest = self._read("manifest.json.gz")
+        available = (self.output_root / "manifest.json.gz").is_file()
+        manifest = self._read("manifest.json.gz") if available else {
+            "year": self.config["data"]["plot_year"], "stages": [], "layers": [],
+            "resource_classes": [],
+        }
         return {
             "site": self.config["site"],
             "map": self.config["map"],
@@ -36,6 +40,10 @@ class WebDataService:
             "layers": self.config["layers"],
             "news": self.config.get("news", []),
             "manifest": manifest,
+            "data_status": {
+                "available": available,
+                "message": "" if available else "尚未生成本地网页数据。请先运行 python -m src.web.build --config config/web.toml。",
+            },
             "visits": self.visits,
         }
 

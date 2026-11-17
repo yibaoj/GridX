@@ -1,0 +1,140 @@
+/* Local extensions: provincial context and a quieter electricity workspace. */
+::selection{background:#cce5d7;color:var(--ink)}
+input{caret-color:var(--accent)}
+.province-table,.map-legend,.detail-panel{scrollbar-color:#afc3b7 #f3f6f4;scrollbar-width:thin}
+.scope-switcher{display:flex;align-items:center;gap:18px;border-bottom:1px solid var(--border);margin-bottom:20px;min-width:0}
+.scope-switcher .scope-tabs{flex:1;min-width:0;margin:0;border:0;overflow-x:auto}
+.scope-tabs>button{min-height:44px}
+.scope-select{flex-shrink:0;margin-bottom:8px}
+.scope-select select{min-height:40px;max-width:210px;font-size:12px}
+.province-context{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:18px}
+.province-context p{color:var(--muted);font-size:13px}
+.button.primary{background:var(--accent);border-color:var(--accent);color:white;min-height:44px}
+.button.primary:hover{background:#1d624c;border-color:#1d624c}
+.metric-strip.provincial-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
+.province-table .selected-province td{background:var(--accent-soft)}
+.selected-province .province-link{color:var(--accent);font-weight:600}
+.province-link{min-height:44px}
+.province-table td{height:44px}
+.province-map-guide{padding:25px 8px 16px 20px;display:flex;flex-direction:column;align-items:flex-start;gap:16px;border-left:1px solid var(--border)}
+.province-map-guide>svg{color:var(--accent)}
+.province-map-guide h2{font-size:18px}
+.province-map-guide p{font-size:14px;color:var(--muted);line-height:1.8;max-width:48ch}
+.page-map{max-width:none;padding:22px 24px 24px}
+.page-map .page-heading{margin-bottom:18px}
+.page-map .page-heading p{margin-top:6px}
+.map-toolbar{padding:9px 12px;gap:14px;border-radius:var(--map-control-radius) var(--map-control-radius) 0 0}
+.map-toolbar select{min-height:40px}
+.layer-tabs button{min-height:40px;padding:8px 13px;font-size:13px}
+.map-toolbar>.button{min-height:40px;font-size:12px}
+.filter-bar{padding:12px 16px;font-size:12px;gap:16px}
+.filter-bar select{font-size:12px;min-height:38px}
+.map-workspace,.map-workspace.has-detail{grid-template-columns:minmax(0,1fr);background:var(--map-ground)}
+.map-main{height:calc(100dvh - 240px);min-height:580px;background:var(--map-ground)}
+.map-canvas{isolation:isolate}
+.map-floating-top{top:18px;left:18px;right:18px}
+.map-search{width:290px;height:44px;box-shadow:none;border-radius:var(--map-control-radius);padding-inline:13px}
+.map-search input{font-size:13px}
+.view-toggle{box-shadow:none;border-radius:var(--map-control-radius)}
+.view-toggle button{min-height:36px;font-size:13px;padding-inline:12px}
+.map-navigation{top:auto;bottom:74px;right:18px;box-shadow:none;border-radius:var(--map-control-radius)}
+.map-navigation button{width:40px;height:40px}
+.map-legend{top:78px;bottom:auto;left:18px;width:260px;padding:0;background:white;box-shadow:none;border-radius:var(--map-control-radius);max-height:calc(100% - 145px)}
+.map-legend.collapsed{width:max-content;max-width:260px}
+.legend-heading{display:flex;align-items:center;gap:8px;width:100%;min-height:44px;padding:10px 13px;text-align:left;color:var(--ink);font-size:13px}
+.legend-heading strong{font-weight:600;flex:1}
+.legend-heading:hover{background:#f2f7f4}
+#map-legend-content{padding:0 13px 14px}
+#map-legend-content[hidden]{display:none}
+.legend-categories{gap:4px 8px}
+.legend-categories button{padding:5px 4px;font-size:12px;min-height:30px}
+.legend-categories button.dim{opacity:1;color:var(--muted)}
+.legend-categories button.dim i{opacity:.45}
+.legend-categories i{width:9px;height:9px}
+.energy-categories,.voltage-levels{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:4px}
+.energy-categories button{display:flex;align-items:center;gap:6px;border:1px solid transparent;border-radius:5px;padding:6px 5px;min-width:0;text-align:left;color:var(--ink);white-space:nowrap}
+.energy-categories button>span{flex:1}
+.energy-categories button:hover{background:#f3f6f4}
+.energy-categories button[aria-pressed="true"]{background:var(--accent-soft);border-color:#88a697;color:#1d5946}
+.energy-categories i{width:11px;height:11px;min-width:11px;border:1.5px solid;border-radius:50%;opacity:1}
+.energy-categories button.dim{color:var(--muted)}
+.energy-categories button.dim i{opacity:.7}
+.legend-actions-row{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:8px}
+.voltage-actions{display:flex;align-items:center;gap:4px;white-space:nowrap}
+.legend-all,.voltage-actions button{border:1px solid var(--border);border-radius:5px;background:white;padding:3px 8px;min-height:28px;color:var(--muted);font-size:12px}
+.legend-all:hover,.voltage-actions button:hover,.voltage-name:hover{background:#f3f6f4}
+.legend-all[aria-pressed="true"],.voltage-actions button[aria-pressed="true"],.voltage-name[aria-pressed="true"]{color:#1d5946;border-color:#88a697;background:var(--accent-soft)}
+.voltage-row{display:grid;grid-template-columns:minmax(0,1fr) 27px;align-items:center;min-width:0}
+.voltage-name{display:flex;align-items:center;gap:5px;white-space:nowrap;padding:3px 4px;min-height:30px;border:1px solid transparent;border-radius:5px;text-align:left;font-size:12px}
+.voltage-swatch{display:block;width:16px;height:3px;border-radius:3px;flex:none}
+.voltage-check{display:grid;place-items:center;min-height:30px;cursor:pointer}
+.voltage-check input{margin:0}
+.more-voltages{margin-top:6px;font-size:12px}
+.more-voltages summary{cursor:pointer;min-height:30px;padding-block:6px;color:var(--muted)}
+.voltage-status{margin-top:7px}
+.resource-picker{flex:none}
+.resource-picker select{font-size:13px;max-width:100%}
+.map-legend small,.legend-range,.height-control{font-size:12px}
+.map-status{height:38px;font-size:12px;padding-inline:16px;gap:10px;flex-wrap:wrap;color:#40564a}
+.status-year{white-space:nowrap}
+.map-attribution{bottom:40px}
+.map-help{left:auto;right:18px;top:74px;font-size:12px}
+.map-caption{font-size:12px;margin-top:10px}
+.detail-panel{position:absolute;z-index:15;right:16px;top:76px;bottom:56px;width:292px;min-height:0;max-height:none;border:1px solid var(--border);border-radius:var(--map-control-radius);box-shadow:none}
+.detail-panel>code{font-size:12px}
+.detail-heading,.detail-meta>div,.detail-row,.detail-panel>p{font-size:13px}
+.detail-heading{margin-bottom:16px}
+.detail-heading .icon-button{width:40px;height:40px}
+.maplibregl-ctrl-bottom-right,.leaflet-bottom{bottom:39px!important}
+.map-host .leaflet-tile-pane{opacity:.35;filter:grayscale(1)}
+.map-host.leaflet-container{background:var(--map-ground)}
+.preview-map .map-navigation{bottom:28px;top:auto;right:12px}
+.preview-map .map-navigation button{width:30px;height:30px}
+.preview-map .map-attribution{bottom:0}
+@media(max-width:1000px){
+  .scope-switcher{flex-direction:column;align-items:stretch;gap:10px;border:0}
+  .scope-switcher .scope-tabs{border-bottom:1px solid var(--border)}
+  .scope-select{align-self:flex-start;margin:0}
+  .map-toolbar{gap:8px}
+  .resource-picker{order:4;flex-basis:100%}
+  .layer-tabs button{padding-inline:10px}
+  .map-main{min-height:560px}
+}
+@media(max-width:700px){
+  .province-context{flex-direction:column;align-items:flex-start;gap:12px}
+  .province-context .button{width:100%;white-space:normal}
+  .metric-strip.provincial-metrics{grid-template-columns:1fr;padding:0;gap:0}
+  .provincial-metrics .metric{padding:16px 18px;border-right:0;border-bottom:1px solid var(--border)}
+  .provincial-metrics .metric:last-child{border-bottom:0}
+  .provincial-metrics .metric>strong{font-size:26px;margin:7px 0 4px}
+  .provincial-metrics .metric-sub{font-size:12px}
+  .province-map-guide{padding:20px 4px;border:0}
+  .scope-select select{min-height:44px;max-width:100%}
+  .page-map{padding:20px 12px}
+  .map-toolbar{padding:10px}
+  .layer-tabs{gap:0}
+  .layer-tabs button{font-size:12px;min-height:44px;padding:8px 7px;flex:0 0 auto}
+  .map-toolbar>.button,.map-toolbar select{min-height:44px}
+  .map-main{height:calc(100dvh - 290px);min-height:530px}
+  .map-floating-top{top:12px;left:12px;right:12px;gap:8px}
+  .map-search{width:auto;flex:1;min-width:0;padding-inline:10px}
+  .map-search input{font-size:12px}
+  .view-toggle button{min-height:36px;padding-inline:10px}
+  .map-legend{top:68px;left:12px;max-height:calc(100% - 128px);width:180px}
+  .map-legend.collapsed{width:130px}
+  .voltage-actions button{padding-inline:5px}
+  .voltage-name,.voltage-check{min-height:34px}
+  .legend-heading{min-height:44px}
+  .map-navigation{top:auto;right:12px;bottom:85px}
+  .map-navigation button{width:44px;height:44px}
+  .map-status{height:auto;min-height:48px;padding:6px 10px;font-size:11px;gap:2px 8px}
+  .map-status>span:not(.status-dot):not(.status-year){display:inline}
+  .map-status>span:first-child{flex-basis:100%}
+  .status-year{margin-left:0}
+  .map-attribution{bottom:50px}
+  .maplibregl-ctrl-bottom-right,.leaflet-bottom{bottom:49px!important}
+  .map-help{top:118px;right:12px;max-width:120px;font-size:11px;text-align:right}
+  .detail-panel{left:12px;right:12px;top:auto;bottom:58px;width:auto;max-height:54%;height:auto;min-height:180px}
+  .detail-panel h2{font-size:16px}
+  .detail-value{font-size:26px}
+}
