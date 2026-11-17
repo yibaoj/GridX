@@ -11,9 +11,20 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from .data import WebDataService, encode_json
+from .ui_data import prepare_dashboard
 
 
 STATIC_ROOT = Path(__file__).with_name("static")
+UI_ROOT = Path(__file__).resolve().parents[2] / "outputs/web-ui"
+
+
+def static_file(path: str) -> Path | None:
+    legacy = path == "/legacy" or path.startswith("/legacy/")
+    root = STATIC_ROOT if legacy or path in {"/app.js", "/styles.css"} or not (UI_ROOT / "index.html").is_file() else UI_ROOT
+    relative = path.removeprefix("/legacy") if legacy else path
+    relative = "index.html" if relative in {"", "/"} else relative.lstrip("/")
+    target = (root / relative).resolve()
+    return target if root.resolve() in target.parents and target.is_file() else None
 
 
 class WebApplication:
@@ -21,6 +32,12 @@ class WebApplication:
 
     def __init__(self, config_path: str | Path = "config/web.toml") -> None:
         self.data = WebDataService(config_path)
+        self.dashboard_error = ""
+        try:
+            self.dashboard = prepare_dashboard(self.data.output_root)
+        except (OSError, ValueError, KeyError) as error:
+            self.dashboard = {}
+            self.dashboard_error = f"本地网页导出数据不完整或格式不兼容：{error}"
 
     def handler(self) -> type[BaseHTTPRequestHandler]:
         application = self
@@ -29,7 +46,7 @@ class WebApplication:
             def do_GET(self) -> None:  # noqa: N802
                 try:
                     application._get(self)
-                except KeyError as error:
+                except (KeyError, FileNotFoundError) as error:
                     self._json({"error": str(error)}, HTTPStatus.NOT_FOUND)
                 except Exception as error:
                     self._json(
@@ -55,7 +72,7 @@ class WebApplication:
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Content-Encoding", "gzip")
-                self.send_header("Cache-Control", "public, max-age=3600")
+                self.send_header("Cache-Control", "no-cache")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -68,7 +85,16 @@ class WebApplication:
     def _get(self, request: BaseHTTPRequestHandler) -> None:
         path = unquote(urlparse(request.path).path)
         if path == "/api/bootstrap":
-            request._json(self.data.bootstrap())
+            payload = self.data.bootstrap()
+            if self.dashboard_error:
+                payload["data_status"] = {"available": False, "message": self.dashboard_error}
+            request._json(payload)
+            return
+        if path in {"/api/overview", "/api/regional-overview"}:
+            name = path.removeprefix("/api/")
+            if name not in self.dashboard:
+                raise FileNotFoundError("尚未生成本地网页数据。")
+            request._prebuilt(self.dashboard[name])
             return
         if path.startswith("/api/boundary/"):
             request._prebuilt(self.data.boundary_path(
@@ -88,9 +114,8 @@ class WebApplication:
 
     @staticmethod
     def _static(request: BaseHTTPRequestHandler, path: str) -> None:
-        relative = "index.html" if path in {"", "/"} else path.lstrip("/")
-        target = (STATIC_ROOT / relative).resolve()
-        if STATIC_ROOT.resolve() not in target.parents or not target.is_file():
+        target = static_file(path)
+        if target is None:
             request.send_error(HTTPStatus.NOT_FOUND)
             return
         body = target.read_bytes()
@@ -98,6 +123,8 @@ class WebApplication:
         request.send_response(HTTPStatus.OK)
         request.send_header("Content-Type", f"{content_type}; charset=utf-8")
         request.send_header("Content-Length", str(len(body)))
+        if target.suffix == ".html":
+            request.send_header("Content-Security-Policy", "connect-src 'self'; object-src 'none'; base-uri 'self'")
         request.end_headers()
         request.wfile.write(body)
 
