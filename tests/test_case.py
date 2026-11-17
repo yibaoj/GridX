@@ -270,3 +270,25 @@ def test_rolling_horizon_solves_each_window_and_carries_storage_state() -> None:
     assert network.storage_units.at[
         "storage:1", "state_of_charge_initial"
     ] == 2.0
+
+
+def test_solver_time_accumulates_native_runtime_without_model_io() -> None:
+    from src.app.uc.manager import _record_solver_time
+    network = SimpleNamespace(meta={}, model=SimpleNamespace(
+        solver_model=SimpleNamespace(getRunTime=lambda: 1.25)))
+    _record_solver_time(network)
+    _record_solver_time(network)
+    assert network.meta['solver_time_s'] == 2.5
+    network.model.solver_model = None
+    _record_solver_time(network)
+    assert network.meta['solver_time_s'] is None
+
+
+def test_uc_rejects_incomplete_case_and_unqualified_solver_output() -> None:
+    from src.app.uc.manager import _has_usable_solution, _snapshots
+
+    snapshots = pd.date_range("2024-07-01", "2024-08-31 23:00", freq="1h")
+    with pytest.raises(ValueError, match="exceeds case coverage"):
+        _snapshots(snapshots, "2024-07-01", "2024-09-30 23:00")
+    assert not _has_usable_solution("ok", "time_limit", 0.0)
+    assert _has_usable_solution("ok", "optimal", 0.0)

@@ -2,12 +2,16 @@
 output_root = "outputs/app/uc"
 strict_case = false
 commitment_mode = "continuous"
-default_start = "2024-08-01 00:00"
-default_end = "2024-08-31 23:00"
+default_start = "2024-07-01 00:00"
+default_end = "2024-09-30 23:00"
 dispatch_tolerance_mw = 0.001
 solve_mode = "single" # "rolling_horizon"
 rolling_horizon_hours = 12
 rolling_overlap_hours = 0
+
+[storage]
+initial_soc_pu = 0.5 # Fraction of p_nom * max_hours before the first interval.
+final_soc_pu = 0.5 # Exact SOC after the last interval of the full simulation.
 
 [reliability]
 enabled = true
@@ -17,6 +21,6 @@ capacity_multiplier = 1.2
 [solver]
 name = "highs"
 method = "ipm"
-time_limit_s = 300.0
+time_limit_s = 2000.0
 mip_gap = 0.01
 log_to_console = false

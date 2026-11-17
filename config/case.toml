@@ -43,7 +43,7 @@ boolean_parameter_names = ["committable", "cyclic_state_of_charge"]
 
 [time]
 start = "2024-05-01 00:00"
-end = "2024-08-31 23:00"
+end = "2024-09-30 23:00"
 time_step = "1h"
 timezone = "Asia/Shanghai"
 

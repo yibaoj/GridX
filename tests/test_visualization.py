@@ -79,3 +79,17 @@ def test_network_voltage_filter_preserves_inputs_and_handles_empty_result():
     assert len(branches) == 2 and len(buses) == 3
     lines, nodes, colors = prepare_network_plot(network, minimum_voltage_kv=1000)
     assert lines.empty and nodes.empty and not colors
+
+
+def test_dispatch_storage_colors_and_bilingual_exchange_labels():
+    from src.app.uc.plot import _color, _dispatch_label, _storage_class
+    assert _storage_class('storage:battery') == 'battery_storage'
+    assert _storage_class('pumped_storage:pumped_hydro') == 'pumped_storage'
+    assert _storage_class('storage:unknown') == 'other_storage'
+    for category in ('battery_storage', 'pumped_storage', 'compressed_air_storage'):
+        assert _color(category + ' charge', 0) == _color(category + ' discharge', 3)
+    assert _dispatch_label('imports', 'zh') == '外来电'
+    assert _dispatch_label('imports', 'en') == 'Imports'
+    assert _dispatch_label('load_shedding', 'zh') == '失负荷'
+    assert _dispatch_label('load_shedding', 'en') == 'Load shedding'
+    assert _dispatch_label('pumped_storage charge', 'zh') == '抽水蓄能充电'

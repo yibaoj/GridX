@@ -41,6 +41,7 @@ def test_exchange_direction_and_window_energy(direction, mode):
     status, condition, objective = _optimize(n, n.snapshots, solve_mode=mode,
         horizon=2, overlap=0, solver_name='highs', log_to_console=False)
     assert status == 'ok' and condition == 'optimal' and np.isfinite(objective)
+    assert np.isfinite(n.meta['solver_time_s']) and n.meta['solver_time_s'] >= 0
     flows = n.links_t.p0[uid]
     windows = [flows] if mode == 'single' else [flows.iloc[i:i+2] for i in range(0,5,2)]
     for window in windows:

@@ -89,12 +89,18 @@ def plot_case(
                 case.network.branch_mapping,
             )
             kwargs.setdefault("title_key", "case_network")
-            return plot_mapped_network(
+            figure = plot_mapped_network(
                 network,
                 cells=cells,
                 **common,
                 **kwargs,
             )
+            from ..visualization.flow import draw_interfaces
+            draw_interfaces(figure, case.network.bus.data,
+                None if case.interface is None else case.interface.data,
+                map_crs=map_crs, language=language,
+                minimum_voltage_kv=kwargs.get("minimum_voltage_kv"))
+            return figure
         if component in {"generator", "storage"}:
             data = getattr(case, component).data.copy()
             data["spatial_uid"] = data["bus_uid"].astype(str)

@@ -16,13 +16,13 @@ from ...visualization.labels import class_label, text
 from .model import UnitCommitmentResult
 
 
-STORAGE_COLORS = {
-    "battery": "#8172b3",
-    "pumped_hydro": "#5d86ad",
-    "compressed_air": "#4c9f9a",
-    "thermal_storage": "#a87955",
-    "other_storage": "#8a8f8d",
+STORAGE_ALIASES = {
+    "battery": "battery_storage", "battery_storage": "battery_storage",
+    "pumped_hydro": "pumped_storage", "pumped_storage": "pumped_storage",
+    "compressed_air": "compressed_air_storage", "compressed_air_storage": "compressed_air_storage",
+    "thermal_storage": "thermal_storage", "capacitor_storage": "capacitor_storage",
 }
+
 
 
 def plot_dispatch(
@@ -54,6 +54,7 @@ def plot_dispatch(
         columns=lambda value: f"{value} discharge"
     )
     charging = -prepared["storage_charge"]
+    charging = charging.loc[:, charging.sum().gt(0)]
     positive = pd.concat([production, discharge], axis=1)
     positive = positive.T.groupby(level=0).sum().T
     positive = positive.loc[:, positive.sum().gt(0)]
@@ -68,10 +69,10 @@ def plot_dispatch(
         )
     charging_total = charging.sum(axis=1) if not charging.empty else 0.0
     if not charging.empty:
-        axis.fill_between(
-            snapshots, 0, -charging_total,
-            color="#7666a8", alpha=0.55,
-            label=text("storage_charging", language),
+        axis.stackplot(
+            snapshots, -charging.to_numpy().T,
+            colors=[_color(f"{name} charge", 0) for name in charging.columns],
+            alpha=0.86, linewidth=0,
         )
     axis.plot(snapshots, load, color="black", linewidth=1.35, zorder=5)
     axis.plot(
@@ -99,14 +100,11 @@ def plot_dispatch(
                 label=text("load_storage", language),
             ),
         ]
-    if not charging.empty:
-        handles.insert(
-            len(positive.columns),
-            Patch(
-                facecolor="#7666a8", alpha=0.55,
-                label=text("storage_charging", language),
-            ),
-        )
+    handles.extend(
+        Patch(facecolor=_color(f"{name} charge", 0),
+              label=_dispatch_label(f"{name} charge", language))
+        for name in charging.columns
+    )
     axis.legend(
         handles=handles,
         loc="upper left",
@@ -152,7 +150,7 @@ def prepare_dispatch_data(
     ).to_pandas().fillna(0)
     storage_class = data["storage_carrier"].sel(
         storage_uid=storage
-    ).to_series().map(_base_class)
+    ).to_series().map(_storage_class)
     storage_discharge = storage_power.clip(lower=0).T.groupby(storage_class).sum().T
     storage_charge = storage_power.clip(upper=0).T.groupby(storage_class).sum().T
 
@@ -164,7 +162,7 @@ def prepare_dispatch_data(
     if "link_interface_direction" in data.coords:
         for direction, bus_coordinate in (("import", "link_bus1"), ("export", "link_bus0")):
             selected = data.link_uid.where(
-                (data.link_interface_direction == direction) & data[bus_coordinate].isin(list(buses)), drop=True)
+                ((data.link_interface_direction == direction) & data[bus_coordinate].isin(list(buses))).compute(), drop=True)
             exchange = data["link_p0_mw"].sel(link_uid=selected).sum("link_uid").to_pandas()
             if direction == "import":
                 generation["imports"] = exchange
@@ -202,20 +200,29 @@ def _base_class(carrier: object) -> str:
     return str(carrier).split(":", 1)[0]
 
 
+def _storage_class(carrier: object) -> str:
+    for part in str(carrier).split(":"):
+        if part in STORAGE_ALIASES:
+            return STORAGE_ALIASES[part]
+    return "other_storage"
+
+
 def _color(name: str, index: int):
-    base = name.removesuffix(" discharge")
+    base = name.removesuffix(" discharge").removesuffix(" charge")
     if base == "load_shedding":
         return "#c75450"
-    if name.endswith(" discharge"):
-        return STORAGE_COLORS.get(base, "#8172b3")
-    return CATEGORY_COLORS.get(
-        base,
-        plt.colormaps["tab20"](index % 20),
-    )
+    if base == "imports":
+        return "#6f8fbd"
+    if name.endswith((" discharge", " charge")):
+        return CATEGORY_COLORS.get(base, "#8a8f8d")
+    return CATEGORY_COLORS.get(base, plt.colormaps["tab20"](index % 20))
 
 
 def _dispatch_label(name: object, language: str) -> str:
     value = str(name)
+    if value.endswith(" charge"):
+        return text("storage_charge_class", language,
+                    class_label=class_label(value.removesuffix(" charge"), language))
     if value.endswith(" discharge"):
         return text(
             "storage_discharge", language,

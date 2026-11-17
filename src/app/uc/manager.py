@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 import tomllib
-import warnings
 
 import numpy as np
 import pandas as pd
@@ -70,6 +69,7 @@ class UnitCommitmentApplication:
                 "Only continuous clustered dispatch is currently validated."
             )
         _add_load_shedding(network, snapshots, self.config["reliability"])
+        _configure_storage_soc(network, snapshots, self.config.get("storage", {}))
         solver = self.config["solver"]
         solver_options = {
             "time_limit": float(solver["time_limit_s"]),
@@ -88,15 +88,10 @@ class UnitCommitmentApplication:
             log_to_console=bool(solver["log_to_console"]),
         )
         condition_name = str(condition).lower()
-        has_solution = objective is not None and np.isfinite(float(objective))
-        if str(status).lower() != "ok" or not has_solution:
-            raise RuntimeError(f"UC optimization failed: {status}, {condition}")
-        if condition_name not in {"optimal", "feasible"}:
-            warnings.warn(
-                f"UC returned a feasible solution with {condition_name!r}; "
-                "optimality was not established.",
-                RuntimeWarning,
-                stacklevel=2,
+        if not _has_usable_solution(status, condition, objective):
+            raise RuntimeError(
+                f"UC did not return a usable solution: status={status}, "
+                f"termination={condition}. Outputs were not saved."
             )
         self._last_model = network.model
         load = network.loads_t.p_set.reindex(snapshots).sum(axis=1)
@@ -110,6 +105,7 @@ class UnitCommitmentApplication:
             "termination_condition": condition,
             "is_optimal": condition_name == "optimal",
             "objective": objective,
+            "solver_time_s": network.meta.get("solver_time_s"),
             "snapshots": len(snapshots),
             "load_mwh": load.mul(weights).sum(),
             "load_shedding_mwh": shedding.mul(weights).sum(),
@@ -179,6 +175,10 @@ class UnitCommitmentApplication:
 
         return self.load().plot(**kwargs)
 
+    def plot_snapshot(self, snapshot, **kwargs):
+        """Plot saved network flows at one solved timestamp without solving again."""
+        return self.load().plot_snapshot(snapshot, **kwargs)
+
 
 def _snapshots(
     snapshots: pd.Index,
@@ -188,7 +188,42 @@ def _snapshots(
     index = pd.DatetimeIndex(snapshots)
     start = index.min() if start is None else pd.Timestamp(start)
     end = index.max() if end is None else pd.Timestamp(end)
+    if len(index) and (start < index.min() or end > index.max()):
+        raise ValueError(
+            f"Requested UC range {start} to {end} exceeds case coverage "
+            f"{index.min()} to {index.max()}. Extend and rebuild the case."
+        )
     return index[(index >= start) & (index <= end)]
+
+
+def _configure_storage_soc(network, snapshots, options) -> None:
+    """Fix energy before the first interval and at the end of the final interval."""
+    initial = float(options.get("initial_soc_pu", 0.5))
+    final = float(options.get("final_soc_pu", 0.5))
+    if not all(np.isfinite(value) and 0 <= value <= 1 for value in (initial, final)):
+        raise ValueError("Storage initial_soc_pu and final_soc_pu must be between 0 and 1.")
+    if network.storage_units.empty:
+        return
+    if network.storage_units.p_nom_extendable.any():
+        raise NotImplementedError("SOC fractions currently require fixed storage capacity.")
+    capacity = network.storage_units.p_nom * network.storage_units.max_hours
+    network.storage_units["cyclic_state_of_charge"] = False
+    network.storage_units["cyclic_state_of_charge_per_period"] = False
+    network.storage_units["state_of_charge_initial_per_period"] = False
+    network.storage_units["state_of_charge_initial"] = initial * capacity
+    network.storage_units_t.state_of_charge_set = pd.DataFrame(
+        np.nan, index=network.snapshots, columns=network.storage_units.index
+    )
+    network.storage_units_t.state_of_charge_set.loc[snapshots[-1]] = final * capacity
+
+
+def _has_usable_solution(status, condition, objective) -> bool:
+    return (
+        str(status).lower() == "ok"
+        and str(condition).lower() in {"optimal", "feasible"}
+        and objective is not None
+        and np.isfinite(float(objective))
+    )
 
 
 def _optimize(
@@ -210,10 +245,13 @@ def _optimize(
     }
     if hasattr(network, "links") and network.links.carrier.eq("boundary_exchange").any():
         optimize_options["extra_functionality"] = interface_constraints
+    if hasattr(network, "meta"):
+        network.meta["solver_time_s"] = 0.0
     if solve_mode == "single":
         status, condition = network.optimize(
             snapshots=snapshots, **optimize_options
         )
+        _record_solver_time(network)
         return str(status), str(condition), network.objective
     if solve_mode != "rolling_horizon":
         raise ValueError("solve_mode must be 'single' or 'rolling_horizon'.")
@@ -239,14 +277,11 @@ def _optimize(
         status, condition = network.optimize(
             snapshots=window, **optimize_options
         )
+        _record_solver_time(network)
         statuses.append(str(status).lower())
         conditions.append(str(condition).lower())
         objective = network.objective
-        if (
-            str(status).lower() != "ok"
-            or objective is None
-            or not np.isfinite(float(objective))
-        ):
+        if not _has_usable_solution(status, condition, objective):
             return str(status), str(condition), objective
         objectives.append(float(objective))
     condition = "optimal" if all(
@@ -254,6 +289,21 @@ def _optimize(
     ) else conditions[-1]
     status = "ok" if all(item == "ok" for item in statuses) else statuses[-1]
     return status, condition, float(sum(objectives))
+
+
+def _record_solver_time(network) -> None:
+    """Accumulate HiGHS native solve seconds, excluding model I/O and postprocessing."""
+
+    if not hasattr(network, "meta"):
+        return
+    solver = getattr(getattr(network, "model", None), "solver_model", None)
+    get_runtime = getattr(solver, "getRunTime", None)
+    elapsed = float(get_runtime()) if get_runtime is not None else None
+    previous = network.meta.get("solver_time_s", 0.0)
+    network.meta["solver_time_s"] = (
+        previous + elapsed
+        if previous is not None and elapsed is not None else None
+    )
 
 
 def _add_load_shedding(network, snapshots: pd.DatetimeIndex, options: dict) -> None:

@@ -44,6 +44,16 @@ def formulation_table(
         )
     )
     rows = _rows(continuous=continuous, has=has, extendable=extendable)
+    for row in rows:
+        if row["item"] == "cyclic state of charge":
+            row["active"] = False
+    if has["storage"]:
+        for bound, value in (("initial", "before first interval"), ("final", "after final interval")):
+            rows.append(dict(section="storage constraints", item=f"{bound} state of charge",
+                symbol="e", indices="s", latex=r"e_s=SOC^{pu}_s h_s\bar P_s",
+                description=f"Configured SOC fraction {value} of the full simulation",
+                active=True, pypsa_names="StorageUnit-energy_balance" if bound == "initial"
+                else "StorageUnit-state_of_charge_set"))
     if has_interface:
         rows.append(dict(section="objective", item="exchange costs", symbol="C^{exchange}",
             indices="interface,t", latex=r"\sum_{k,t} w_t c_k p_{k,t}",

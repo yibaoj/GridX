@@ -28,3 +28,9 @@ class UnitCommitmentResult:
         from .plot import plot_dispatch
 
         return plot_dispatch(self, **kwargs)
+
+    def plot_snapshot(self, snapshot, **kwargs):
+        """Return a network Figure or, with animate=True, a direction animation."""
+        from .snapshot import plot_snapshot
+
+        return plot_snapshot(self, snapshot, **kwargs)

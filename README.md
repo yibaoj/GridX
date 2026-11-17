@@ -416,7 +416,22 @@ figure = application.plot(
     start="2024-07-15 00:00",
     end="2024-07-15 23:00",
 )
+network_figure = case.plot("network")  # Interface线路和虚拟外部母线使用紫色独立标记。
+flow_figure = result.plot_snapshot("2024-08-31 23:00", minimum_voltage_kv=500)
+# 从磁盘结果绘图：application.plot_snapshot("2024-08-31 23:00", language="en")
 ```
+
+`plot_snapshot` 选择一个精确的已求解时间点：静态图以箭头表示潮流方向，统一线宽，颜色表示
+有功功率占该时段、该方向容量上限的比例。直流用虚线，交流用实线，省间联络线（Interface）用点划线。
+零潮流设备为灰色。母线以图中相连支路的最高有功负载率着色，虚拟外部母线用菱形表示。
+换流器用三角，变压器用加号。设备与母线符号置于移动点上方，同址设备符号略微错开。
+`label_flows=True` 可附加 MW 数值，`language="zh"/"en"` 切换语言。
+`animate=True` 返回 Matplotlib `FuncAnimation`，沿线路移动的点表示该断面的潮流方向，
+零潮流不移动；移动速度没有物理含义，也不表示跨时段变化。Notebook 中可用
+`HTML(animation.to_jshtml())` 显示，也可以 `animation.save("flow.gif", writer="pillow", fps=12)`。
+负载率是当前有功模型的指标，不是考虑无功后的视在功率负载率。Interface虚拟节点放在
+原跨界线路的外部端点，仅作为等值模型的位置示意。新结果保存求解时的支路上下限；旧结果
+缺少这些字段时使用当前case的后端容量并提示警告，潮流数值仍来自保存的求解结果。
 
 case的七类公共数据写入唯一目录`outputs/case/`；`load(dataset_id)`可独立读取，`load()`恢复完整
 `PowerSystemCase`。case和application的plot接口均只返回Figure，不自动保存图片。
@@ -684,3 +699,12 @@ PyPSA 中，进口 Link 为外部→内部，出口为内部→外部；外部 G
 一回路按完整双极通道计，不能直接用于单极/单导线建模；多段线路或重复通道仍需核实。
 该 CSV 是仓库维护的补充输入；修改后需重建 standard parameter、mapping parameter 和 case。
 Interface 仍拒绝缺失容量的 fallback；普通后端转换中的 fallback 行为保持不变。
+
+`config/uc.toml` 的 `[storage]` 设置 `initial_soc_pu=0.5` 和 `final_soc_pu=0.5`，
+分别固定完整仿真开始前和最后一个时段结束后的储能电量，占 `p_nom * max_hours` 的比例。
+UC 中显式 SOC 设置覆盖 case 的 cyclic SOC 参数；滚动窗口之间继续传递 SOC，只有最后窗口
+施加期末目标。当前支持固定储能容量。结果同时保存净功率、充电功率和放电功率。
+
+UC 的 `summary["solver_time_s"]` 记录 HiGHS 原生求解用时（秒），不包含模型构建、
+文件写出/读取和结果回填；滚动求解累加各窗口用时。未提供该计时接口的求解器返回空值。
+已有历史结果不会补算此字段，需重新运行才能记录。

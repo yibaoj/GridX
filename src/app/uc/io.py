@@ -29,6 +29,8 @@ def operation_dataset(
         ("generator", network.generators, network.generators_t, (("p", "p_mw", "MW"),)),
         ("storage", network.storage_units, network.storage_units_t, (
             ("p", "p_mw", "MW"),
+            ("p_store", "p_store_mw", "MW"),
+            ("p_dispatch", "p_dispatch_mw", "MW"),
             ("state_of_charge", "state_of_charge_mwh", "MWh"),
         )),
         ("load", network.loads, network.loads_t, (("p_set", "p_set_mw", "MW"),)),
@@ -55,6 +57,21 @@ def operation_dataset(
                         dimension, static[column].astype(str).to_numpy()
                     )
                 })
+        if component in {"line", "transformer", "link"}:
+            name = {"line": "Line", "transformer": "Transformer", "link": "Link"}[component]
+            for side, sense in (("upper", "max"), ("lower", "min")):
+                if component == "link":
+                    capacity = static.p_nom.where(~static.p_nom_extendable, static.p_nom_opt)
+                    limits = network.get_switchable_as_dense(name, f"p_{sense}_pu", snapshots).mul(capacity, axis=1)
+                else:
+                    capacity = static.s_nom.where(~static.s_nom_extendable, static.s_nom_opt)
+                    limits = network.get_switchable_as_dense(name, "s_max_pu", snapshots).mul(capacity, axis=1)
+                    if side == "lower":
+                        limits = -limits
+                data[f"{component}_p_limit_{side}_mw"] = (
+                    ("time", dimension), limits.reindex(columns=static.index).to_numpy(dtype=float)
+                )
+                data[f"{component}_p_limit_{side}_mw"].attrs["unit"] = "MW"
     optional = (
         ("generator", network.generators, network.generators_t, (
             ("status", "status", "binary"),
