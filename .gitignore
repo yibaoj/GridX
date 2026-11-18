@@ -7,25 +7,30 @@ outputs/
 references/
 reports/
 
-# Large research and geospatial artifacts
-*.pdf
-*.xlsx
-*.xls
-*.zip
-*.7z
-*.pbf
-*.gpkg
-*.geojsonseq
-*.tif
-*.tiff
-*.parquet
-*.nc
+# Notebook sources only, including nested notebook folders
+/notebooks/**
+!/notebooks/**/
+!/notebooks/**/*.ipynb
+
+# Ad hoc artifacts at repository root; source assets and test fixtures stay trackable
+/*.pdf
+/*.xlsx
+/*.xls
+/*.zip
+/*.7z
+/*.pbf
+/*.gpkg
+/*.geojsonseq
+/*.tif
+/*.tiff
+/*.parquet
+/*.nc
 
 # Generated figures
-*.png
-*.jpg
-*.jpeg
-*.svg
+/*.png
+/*.jpg
+/*.jpeg
+/*.svg
 
 # Python and Jupyter caches
 __pycache__/
@@ -43,6 +48,8 @@ venv/
 env/
 .env
 .env.*
+!.env.example
+!.env.template
 *.pem
 *.key
 .cdsapirc

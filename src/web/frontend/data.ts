@@ -1,3 +1,4 @@
+import {readPayload} from './contract';
 import {useEffect,useState} from 'react';
 import type {GeoFeature,Prepared,LayerId,MapSettings} from './types';
 export const layerNames:Record<LayerId,string>={generator:'发电',storage:'储能',network:'电网',load:'用电量',resource:'可再生资源',population:'人口'};
@@ -9,7 +10,7 @@ export const dateLabel=(value:string)=>value.replace('T',' ').slice(0,16);
 export const duration=()=>matchMedia('(prefers-reduced-motion: reduce)').matches?0:220;
 const cache=new Map<string,Promise<unknown>>();
 export function request<T>(url:string):Promise<T>{
-  if(!cache.has(url)) cache.set(url,fetch(url).then(async r=>{if(!r.ok)throw new Error(`数据请求失败（${r.status}）`);return r.json();}).catch(e=>{cache.delete(url);throw e;}));
+  if(!cache.has(url)) cache.set(url,fetch(url).then(async r=>{if(!r.ok)throw new Error(`数据请求失败（${r.status}）`);return readPayload<T>(r);}).catch(e=>{cache.delete(url);throw e;}));
   return cache.get(url) as Promise<T>;
 }
 export function useResource<T>(url:string){const[data,setData]=useState<T>();const[error,setError]=useState('');const[version,setVersion]=useState(0);useEffect(()=>{let active=true;setError('');request<T>(url).then(x=>{if(active)setData(x);}).catch(e=>{if(active)setError(e.message);});return()=>{active=false;};},[url,version]);return{data,error,retry:()=>{cache.delete(url);setVersion(x=>x+1);}};}

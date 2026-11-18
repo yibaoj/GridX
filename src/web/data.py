@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import tomllib
 from typing import Any
+from .contract import validate_payload
 
 
 class WebDataService:
@@ -103,7 +104,9 @@ class WebDataService:
     def _read(self, relative: str) -> dict[str, Any]:
         path = self._path(relative)
         with gzip.open(path, "rt", encoding="utf-8") as file:
-            return json.load(file)
+            payload = json.load(file)
+        validate_payload(relative, payload)
+        return payload
 
     def _path(self, relative: str) -> Path:
         path = (self.output_root / relative).resolve()

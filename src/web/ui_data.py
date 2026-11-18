@@ -10,14 +10,14 @@ import json
 import math
 from pathlib import Path
 import tempfile
-
-
-SCHEMA_VERSION = 1
+from .contract import SCHEMA_VERSION, validate_payload
 
 
 def read_payload(path: Path) -> dict:
     with gzip.open(path, "rt", encoding="utf-8") as stream:
-        return json.load(stream)
+        payload = json.load(stream)
+    validate_payload(str(path), payload)
+    return payload
 
 
 def polygons(geometry: dict | None) -> list:
@@ -312,7 +312,7 @@ def prepare_dashboard(output_root: Path) -> dict[str, Path]:
         return {}
     revision = hashlib.sha256(json.dumps(sources, sort_keys=True).encode() +
                               Path(__file__).read_bytes()).hexdigest()
-    paths = {name: output_root.parent / "web-ui-data" / revision / (name + ".json.gz")
+    paths = {name: output_root.parent / "cache" / revision / (name + ".json.gz")
              for name in ("overview", "regional-overview")}
     try:
         cached = [read_payload(path) for path in paths.values()]

@@ -118,8 +118,8 @@ class DashboardDataTests(unittest.TestCase):
         self.assertIn("src.web.build", status["data_status"]["message"])
 
     def test_new_and_legacy_assets_keep_their_routes_and_cannot_escape(self):
-        ui = Path(self.temporary.name) / "ui"
-        legacy = Path(self.temporary.name) / "legacy"
+        ui = Path(self.temporary.name).resolve() / "ui"
+        legacy = Path(self.temporary.name).resolve() / "legacy"
         for folder in (ui, legacy):
             folder.mkdir()
             (folder / "index.html").write_text("page", encoding="utf-8")
@@ -129,6 +129,45 @@ class DashboardDataTests(unittest.TestCase):
             self.assertEqual(app.static_file("/legacy/"), legacy / "index.html")
             self.assertEqual(app.static_file("/app.js"), legacy / "app.js")
             self.assertIsNone(app.static_file("/../../config/web.toml"))
+
+    def test_contract_rejects_changed_versions_and_misaligned_uc_series(self):
+        from .contract import validate_payload
+        validate_payload("manifest.json.gz", self.inputs["manifest.json.gz"])
+        incompatible = {**self.inputs["manifest.json.gz"], "schema_version": 2}
+        with self.assertRaisesRegex(ValueError, "schema_version"):
+            validate_payload("manifest.json.gz", incompatible)
+        uc = copy.deepcopy(self.inputs["application/uc.json.gz"])
+        uc["series"][0]["values"].pop()
+        with self.assertRaisesRegex(ValueError, "length"):
+            validate_payload("application/uc.json.gz", uc)
+        layer = copy.deepcopy(self.inputs["layers/standard/generator.json.gz"])
+        layer["schema_version"] = 1
+        layer["summary"]["unit"] = "GW"
+        with self.assertRaisesRegex(ValueError, "unit"):
+            validate_payload("layers/standard/generator.json.gz", layer)
+
+    def test_failed_export_preserves_previous_package(self):
+        from .build import WebDataBuilder
+        builder = WebDataBuilder.__new__(WebDataBuilder)
+        builder.output_root = self.root / "replacement"
+        builder.output_root.mkdir()
+        previous = builder.output_root / "keep.txt"
+        previous.write_text("old")
+        with patch.object(builder, "_build_package", side_effect=ValueError("incompatible")):
+            with self.assertRaisesRegex(ValueError, "incompatible"):
+                builder.build()
+        self.assertEqual(previous.read_text(), "old")
+
+        def package():
+            manifest = copy.deepcopy(self.inputs["manifest.json.gz"])
+            builder._write("manifest.json.gz", manifest)
+            return manifest
+
+        with patch.object(builder, "_build_package", side_effect=package):
+            builder.build()
+        exported = read_payload(builder.output_root / "manifest.json.gz")
+        self.assertEqual(exported["schema_version"], 1)
+        self.assertFalse(previous.exists())
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from pathlib import Path
 import tomllib
 from typing import Any
 import warnings
+import tempfile
 
 import geopandas as gpd
 import numpy as np
@@ -33,6 +34,7 @@ from ..standard.plot import (
     network_style_sort_key,
 )
 from ..visualization.labels import class_label
+from .contract import SCHEMA_VERSION, validate_payload
 
 
 class WebDataBuilder:
@@ -64,6 +66,28 @@ class WebDataBuilder:
         self._case_cache = None
 
     def build(self) -> dict[str, Any]:
+        """Validate a complete replacement before publishing it to the data directory."""
+        destination = self.output_root
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".web-build-", dir=destination.parent) as folder:
+            staging = Path(folder) / "data"
+            self.output_root = staging
+            try:
+                manifest = self._build_package()
+            finally:
+                self.output_root = destination
+            previous = Path(folder) / "previous"
+            if destination.exists():
+                destination.rename(previous)
+            try:
+                staging.rename(destination)
+            except OSError:
+                if previous.exists():
+                    previous.rename(destination)
+                raise
+        return manifest
+
+    def _build_package(self) -> dict[str, Any]:
         """Build boundaries, map layers, and saved application series."""
 
         self.output_root.mkdir(parents=True, exist_ok=True)
@@ -302,6 +326,8 @@ class WebDataBuilder:
         ]
 
     def _write(self, relative: str, payload: dict[str, Any]) -> None:
+        payload = {**payload, "schema_version": SCHEMA_VERSION}
+        validate_payload(relative, payload)
         path = self.output_root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         encoded = json.dumps(

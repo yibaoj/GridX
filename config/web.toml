@@ -12,7 +12,7 @@ standard_config = "config/standard_data.toml"
 mapping_config = "config/mapping.toml"
 case_config = "config/case.toml"
 uc_config = "config/uc.toml"
-output_root = "outputs/web"
+output_root = "outputs/web/data"
 plot_year = 2024
 geometry_simplify_degrees = 0.01
 

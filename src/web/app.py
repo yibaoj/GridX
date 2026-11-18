@@ -14,8 +14,8 @@ from .data import WebDataService, encode_json
 from .ui_data import prepare_dashboard
 
 
-STATIC_ROOT = Path(__file__).with_name("static")
-UI_ROOT = Path(__file__).resolve().parents[2] / "outputs/web-ui"
+STATIC_ROOT = Path(__file__).with_name("legacy")
+UI_ROOT = Path(__file__).resolve().parents[2] / "outputs/web/site"
 
 
 def static_file(path: str) -> Path | None:

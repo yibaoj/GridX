@@ -458,7 +458,7 @@ SOC、潮流、可用的启停变量和节点边际电价均保存在NetCDF中�
 - `notebooks/uc_exp.ipynb`：PyPSA一日UC demo，不含N-1/N-k安全约束。
 - `notebooks/test_layers.ipynb`：五层接口、case 到 PyPSA 的映射及实际优化模型检查。
 
-GridX（网探）网站只读取`outputs/web/`中的离线绘图数据。先调用与后端plot共享的准备
+GridX（网探）网站只读取`outputs/web/data/`中的离线绘图数据。先调用与后端plot共享的准备
 函数生成压缩GeoJSON和图例元数据，再启动只读服务：
 
 ```bash
@@ -469,7 +469,7 @@ conda run -n env-py313 python -m src.web.app
 网站请求期间不再启动GeoPandas/Xarray聚合；预压缩文件由HTTP服务直接发送。访问
 `http://127.0.0.1:8765`。
 
-`outputs/web/manifest.json.gz`描述可用层和资源子类，`boundary/common.json.gz`保存共享背景边界，
+`outputs/web/data/manifest.json.gz`描述可用层和资源子类，`boundary/common.json.gz`保存共享背景边界，
 `layers/{standard,mapping,case}/`按dataset惰性加载地图载荷，`application/uc.json.gz`
 保存生产模拟图所需的时序。`src/web/build.py`直接复用后端plot模块中的
 `prepare_*`函数，而不是另写统计口径；压缩、几何简化和分层文件切分均在离线构建期完成。
