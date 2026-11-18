@@ -5,6 +5,7 @@ import gzip
 import hashlib
 import json
 from urllib.parse import urlparse
+from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 from .data import WebDataService
@@ -55,9 +56,28 @@ def check(address: str, config: str) -> dict:
             "result": "passed"}
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--address", default="http://127.0.0.1:8765")
     parser.add_argument("--config", default="config/web.toml")
     options = parser.parse_args()
-    print(json.dumps(check(options.address, options.config), ensure_ascii=False))
+    try:
+        result = check(options.address, options.config)
+    except HTTPError as error:
+        parser.exit(1, f"Web check failed: HTTP {error.code} at {error.url}. "
+                    "Rebuild the data with python -m src.web.build, "
+                    "then restart python -m src.web.app.\n")
+    except URLError as error:
+        parser.exit(1, f"Cannot connect to {options.address}: {error.reason}. "
+                    "Start the service in another terminal with "
+                    "conda run --no-capture-output -n env-py313 python -m src.web.app, "
+                    "then run this check again. "
+                    "To build data, use python -m src.web.build.\n")
+    except (AssertionError, FileNotFoundError, ValueError) as error:
+        parser.exit(1, f"Web data check failed: {error}. "
+                    "Check config/web.toml, rebuild the data and restart the service.\n")
+    print(json.dumps(result, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

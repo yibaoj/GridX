@@ -43,11 +43,9 @@ outputs/web/
 `config/web.toml` 的 `[data].output_root = "outputs/web/data"`，准备导出数据。
 
 ```shell
-cd src/web/frontend
-npm ci
-npm run build
-cd ../../..
-conda run -n env-py313 python -m src.web.app
+npm --prefix src/web/frontend ci
+npm --prefix src/web/frontend run build
+conda run --no-capture-output -n env-py313 python -m src.web.app
 ```
 
 打开 `http://127.0.0.1:8765/`。Python 提供构建页面和 API，前端使用本地行政边界，图表及地图库随构建打包。
@@ -55,7 +53,7 @@ conda run -n env-py313 python -m src.web.app
 数据导出需要标准层、映射层、Case 与已保存的 UC 结果齐全。
 
 ```shell
-conda run -n env-py313 python -m src.web.build --config config/web.toml
+conda run --no-capture-output -n env-py313 python -m src.web.build --config config/web.toml
 ```
 
 `build.py` 是后端模型与网页之间的适配器。后端字段、对象或准备函数变化时，在这里继续转换成同一网页数据格式。
@@ -97,16 +95,29 @@ UC 每条 series 包含 id、kind、values，values 与 time 等长，功率单�
 
 ## 验证与部署
 
+`src.web.build` 构建数据，`src.web.app` 启动服务，`src.web.check` 检查运行中的服务。
+前端 build 生成网页文件。以下命令在 GridX 仓库根目录逐行执行，行尾无需添加反斜杠。
+
+终端 A，构建数据、测试并启动服务。保留服务运行，在浏览器打开 http://127.0.0.1:8765/。
+
 ```shell
-conda run -n env-py313 python -m unittest src.web.test_ui_data -v
-cd src/web/frontend
-npm test
-npm run build
-cd ../../..
-conda run -n env-py313 python -m src.web.check
+conda run --no-capture-output -n env-py313 python -m src.web.build --config config/web.toml
+conda run --no-capture-output -n env-py313 python -m unittest src.web.test_ui_data -v
+npm --prefix src/web/frontend test
+npm --prefix src/web/frontend run build
+conda run --no-capture-output -n env-py313 python -m src.web.app
 ```
 
-最后一项需要已启动的本地服务，比较 HTTP 数据和实际导出包，并验证首页指标来源。
+终端 B，在同一个 GridX 仓库根目录验证服务。
+
+```shell
+conda run --no-capture-output -n env-py313 python -m src.web.check
+```
+
+服务检查比较 HTTP 数据和实际导出包，并验证首页指标来源。默认地址为
+`http://127.0.0.1:8765`，其他端口可用 `--address http://127.0.0.1:9000` 指定。
+出现连接失败时先检查终端 A 的启动输出。已有旧服务时，在终端 A 按 Ctrl+C 停止，
+完成数据更新后重新启动，再执行检查。`--no-capture-output` 让 conda 实时显示日志。
 
 公开域名可通过 Nginx/Caddy 转发到本机 Python 服务，页面和 `/api` 保持同源。
 部署需准备 `site/`、`data/` 和服务配置，`cache/` 可在启动时重建。当前 HTTP 入口是开发服务，

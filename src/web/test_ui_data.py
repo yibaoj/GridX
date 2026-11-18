@@ -169,6 +169,21 @@ class DashboardDataTests(unittest.TestCase):
         self.assertEqual(exported["schema_version"], 1)
         self.assertFalse(previous.exists())
 
+    def test_check_reports_missing_service_with_start_command(self):
+        from contextlib import redirect_stderr
+        from io import StringIO
+        from urllib.error import URLError
+        from . import check
+
+        message = StringIO()
+        with patch.object(sys, 'argv', ['check']), redirect_stderr(message):
+            with patch.object(check, 'check', side_effect=URLError('Connection refused')):
+                with self.assertRaises(SystemExit) as error:
+                    check.main()
+        self.assertEqual(error.exception.code, 1)
+        self.assertIn('python -m src.web.app', message.getvalue())
+        self.assertIn('python -m src.web.build', message.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
