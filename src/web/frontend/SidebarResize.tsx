@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 
 const minimum=180;
-const standard=220;
+const standard=200;
 const maximum=320;
 const storageKey='gridx.sidebarWidth';
 const clamp=(value:number,upper:number)=>Math.min(upper,Math.max(minimum,Math.round(value)));

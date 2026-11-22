@@ -41,6 +41,7 @@ def _run_of_river_capacity_factor(
     ).clip(0, 1).fillna(0)
 
 
+
 class _ResourceStandardizer(_Standardizer):
     def build(self) -> xr.Dataset:
         import atlite

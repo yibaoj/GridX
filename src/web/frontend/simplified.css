@@ -130,3 +130,23 @@
   .simulation-metrics>div>span{font-size:13px}
   .simulation-metrics strong{font-size:24px}
 }
+
+/* Shared typography hierarchy for the light workspace. */
+:root{font-family:"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased}
+h1,h2,h3,.region-picker select{font-weight:700;letter-spacing:-.025em;line-height:1.25}
+h1,.region-picker select{font-size:28px}
+h2,.overview-grid .panel-heading h2{font-size:18px;font-weight:700}
+h3{font-size:15px;font-weight:650}
+.brand{font-size:25px;font-weight:750;letter-spacing:-.045em}
+.sidebar nav a,.sidebar nav button{font-weight:600;letter-spacing:-.01em}
+.sidebar-brand-row .brand{padding-bottom:24px}
+.panel-heading{padding-block:20px}
+.panel-heading>div>span,.metric-label,.chart-footnote{line-height:1.55}
+.regional-metrics .metric>strong,.simulation-metrics strong{font-size:32px;font-weight:700;letter-spacing:-.04em;line-height:1.15;font-variant-numeric:tabular-nums lining-nums}
+.regional-metrics .metric small,.simulation-metrics strong small{font-size:12px;font-weight:500;letter-spacing:0}
+.regional-metrics .metric-label{font-size:13px;font-weight:500}
+.province-table th,.data-table-scroll th{font-size:12px;font-weight:600;letter-spacing:.015em}
+.province-table td{font-size:14px;line-height:1.5}
+.province-table .numeric{font-weight:600;letter-spacing:-.015em}
+.button,.layer-tabs button,.page-actions button{font-weight:600}
+@media(max-width:700px){h1,.region-picker select{font-size:24px}.regional-metrics .metric>strong,.simulation-metrics strong{font-size:26px}.overview-grid .panel-heading h2{font-size:16px}}

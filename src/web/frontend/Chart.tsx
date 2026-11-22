@@ -20,6 +20,6 @@ export function renderChartPng(option:EChartsCoreOption,width:number,height:numb
 export default function Chart({option,label,onReady,onClick,height=280}:{option:EChartsCoreOption;label:string;onReady?:(chart:EChartsType)=>void;onClick?:(event:any)=>void;height?:number}){
   const ref=useRef<HTMLDivElement>(null);const chart=useRef<EChartsType|undefined>(undefined);const click=useRef(onClick);click.current=onClick;
   useEffect(()=>{const instance=echarts.init(ref.current);chart.current=instance;instance.on('click',event=>click.current?.(event));onReady?.(instance);const observer=new ResizeObserver(()=>instance.resize());observer.observe(ref.current!);return()=>{observer.disconnect();instance.dispose();};},[]);
-  useEffect(()=>{chart.current?.setOption({animation:!matchMedia('(prefers-reduced-motion: reduce)').matches,animationDuration:200,textStyle:{fontFamily:'system-ui, Microsoft YaHei, sans-serif',color:'#5d6c65'},aria:{enabled:true,label:{description:label}},...option},true);},[option,label]);
+  useEffect(()=>{chart.current?.setOption({animation:!matchMedia('(prefers-reduced-motion: reduce)').matches,animationDuration:200,textStyle:{fontFamily:getComputedStyle(document.documentElement).fontFamily,color:'#5d6c65'},aria:{enabled:true,label:{description:label}},...option},true);},[option,label]);
   return <div ref={ref} className="chart" role="img" aria-label={label} style={{height}}/>;
 }

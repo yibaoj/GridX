@@ -133,6 +133,7 @@ class SourceDownloader:
     @staticmethod
     def _download_atlite(source: pd.Series, path: Path) -> None:
         import atlite
+        import dask
 
         options = SourceDownloader._atlite_options(source)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -146,12 +147,17 @@ class SourceDownloader:
                 y=slice(*options["y"]),
                 time=slice(options["start"], options["end"]),
             )
-            cutout.prepare(
-                features=options["features"],
-                monthly_requests=options["monthly_requests"],
-                concurrent_requests=options["concurrent_requests"],
-                show_progress=options["show_progress"],
-            )
+            # atlite also schedules different weather features through Dask.
+            # Serialize these as well when monthly concurrency is disabled.
+            with dask.config.set(scheduler=(
+                "threads" if options["concurrent_requests"] else "synchronous"
+            )):
+                cutout.prepare(
+                    features=options["features"],
+                    monthly_requests=options["monthly_requests"],
+                    concurrent_requests=options["concurrent_requests"],
+                    show_progress=options["show_progress"],
+                )
             SourceDownloader._validate_atlite(source, partial)
             partial.replace(path)
         except Exception:

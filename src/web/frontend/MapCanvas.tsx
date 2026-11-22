@@ -14,6 +14,12 @@ export interface MapProps {features:GeoFeature[];settings:MapSettings;summary:Su
 export default function MapCanvas(props:MapProps){
   const ref=useRef<HTMLDivElement>(null);const map=useRef<maplibregl.Map|undefined>(undefined);const overlay=useRef<MapboxOverlay|undefined>(undefined);const callbacks=useRef(props);callbacks.current=props;
   const[fallback,setFallback]=useState(props.forceFallback||new URLSearchParams(location.search).get('renderer')==='leaflet');const[ready,setReady]=useState(false);const[viewZoom,setViewZoom]=useState(4);const[boundary,setBoundary]=useState<FeatureCollection>();
+  const[detailed,setDetailed]=useState(true);
+  const showDetailed=detailed&&!props.settings.threeD;
+  const leaflet=fallback||showDetailed;
+  const basemapToggle=<button type="button" className="map-basemap-toggle" aria-pressed={showDetailed}
+    disabled={props.settings.threeD} title={props.settings.threeD?'切换至 2D 后可显示详细底图':'显示道路、河流与城市地名'}
+    onClick={()=>setDetailed(value=>!value)}>详细底图</button>;
   const[hover,setHover]=useState<{x:number;y:number;feature:GeoFeature;source:GeoFeature[]}>();
   const activeHover=hover?.source===props.features ? hover : undefined;
   const assets=props.settings.layer==='generator'||props.settings.layer==='storage';
@@ -27,7 +33,8 @@ export default function MapCanvas(props:MapProps){
   useEffect(()=>{request<FeatureCollection>('/api/boundary/standard').then(setBoundary).catch(()=>{});},[]);
   useEffect(()=>{props.onFallback?.(fallback);},[fallback]);
   useEffect(()=>{
-    if(fallback)return;
+    if(leaflet)return;
+    setReady(false);
     try{
       const instance=new maplibregl.Map({container:ref.current!,style:{version:8,sources:{},layers:[{id:'background',type:'background',paint:{'background-color':'#eef2f0'}}]},center:[104,35.5],zoom:3.4,minZoom:2,maxZoom:13,maxPitch:65,attributionControl:false,canvasContextAttributes:{antialias:true},renderWorldCopies:false});
       map.current=instance;
@@ -38,7 +45,7 @@ export default function MapCanvas(props:MapProps){
       const resize=new ResizeObserver(()=>instance.resize());resize.observe(ref.current!);
       return()=>{resize.disconnect();instance.remove();map.current=undefined;overlay.current=undefined;};
     }catch{setFallback(true);}
-  },[fallback]);
+  },[leaflet]);
   useEffect(()=>{if(ready&&map.current)map.current.easeTo({pitch:props.settings.threeD?45:0,duration:duration()});},[ready,props.settings.threeD]);
   useEffect(()=>{if(ready&&props.focus&&map.current){const b=props.focus.bounds;map.current.fitBounds([[b[0],b[1]],[b[2],b[3]]],{padding:props.compact?35:70,maxZoom:8,duration:duration()});}},[props.focus,ready]);
   useEffect(()=>{
@@ -61,8 +68,8 @@ export default function MapCanvas(props:MapProps){
     if(marked.length)layers.push(new GeoJsonLayer({id:'selection',data:marked,filled:false,stroked:true,getLineColor:[22,51,43,255],getLineWidth:2,lineWidthUnits:'pixels',pointRadiusUnits:'pixels',getPointRadius:(f:GeoFeature)=>assets?pointRadius(f,settings,maxValue,viewZoom)+3.5:9,pickable:false}));
     overlay.current.setProps({layers});
   },[ready,boundary,viewZoom,props.features,props.settings,props.summary,props.max,props.selected,activeHover?.feature,points,surfaces,maxValue,marked,assets]);
-  if(fallback)return <div className="map-canvas"><Suspense fallback={<div className="map-loading">正在加载兼容地图…</div>}><LeafletMap {...props} boundary={boundary}/></Suspense><div className="map-renderer">兼容 2D · Leaflet</div></div>;
-  return <div className="map-canvas" data-renderer="webgl"><div ref={ref} className="map-host" role="region" aria-label="交互式电力地图"/>
+  if(leaflet)return <div className="map-canvas"><Suspense fallback={<div className="map-loading">正在加载兼容地图…</div>}><LeafletMap {...props} boundary={boundary} detailed={showDetailed}/></Suspense>{basemapToggle}<div className="map-renderer">{showDetailed?'详细底图 · 2D':'兼容 2D · Leaflet'}</div></div>;
+  return <div className="map-canvas" data-renderer="webgl">{basemapToggle}<div ref={ref} className="map-host" role="region" aria-label="交互式电力地图"/>
     <div className="map-attribution">行政边界 · 本地导出数据</div><div className="map-navigation"><button title="放大" aria-label="放大地图" onClick={()=>map.current?.zoomIn({duration:duration()})}><Plus size={17}/></button><button title="缩小" aria-label="缩小地图" onClick={()=>map.current?.zoomOut({duration:duration()})}><Minus size={17}/></button><button title="恢复北向" aria-label="恢复北向" onClick={()=>map.current?.easeTo({bearing:0,duration:duration()})}><Compass size={17}/></button><button title="全国视图" aria-label="恢复全国视图" onClick={()=>map.current?.fitBounds([[73,17],[135,54]],{padding:40,duration:duration()})}><RotateCcw size={16}/></button></div>
     {props.settings.threeD&&<div className="map-help">右键拖动旋转 · 滚轮缩放</div>}
     {activeHover&&<div className="map-tooltip" style={{left:Math.max(8,Math.min(activeHover.x+14,(ref.current?.clientWidth||500)-250)),top:Math.max(8,activeHover.y-72)}}><strong>{activeHover.feature.properties.__count?`${format(activeHover.feature.properties.__count)} 个位置聚合`:activeHover.feature.properties.name||featureId(activeHover.feature)}</strong><span>{props.settings.layer==='network'?`${format(activeHover.feature.properties.voltage_kv)} kV · ${activeHover.feature.properties.current_type||'—'}`:`${format(activeHover.feature.properties.__value,2)} ${valueUnit(props.settings.layer,props.summary)}`}</span><small>点击查看详情</small></div>}
