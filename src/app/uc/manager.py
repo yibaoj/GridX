@@ -71,12 +71,7 @@ class UnitCommitmentApplication:
         _add_load_shedding(network, snapshots, self.config["reliability"])
         _configure_storage_soc(network, snapshots, self.config.get("storage", {}))
         solver = self.config["solver"]
-        solver_options = {
-            "time_limit": float(solver["time_limit_s"]),
-            "mip_rel_gap": float(solver["mip_gap"]),
-        }
-        if solver.get("method"):
-            solver_options["solver"] = str(solver["method"])
+        solver_options = _solver_options(solver)
         status, condition, objective = _optimize(
             network,
             snapshots,
@@ -85,7 +80,6 @@ class UnitCommitmentApplication:
             overlap=int(options.get("rolling_overlap_hours", 0)),
             solver_name=str(solver["name"]),
             solver_options=solver_options,
-            log_to_console=bool(solver["log_to_console"]),
         )
         condition_name = str(condition).lower()
         if not _has_usable_solution(status, condition, objective):
@@ -291,14 +285,41 @@ def _optimize(
     return status, condition, float(sum(objectives))
 
 
+def _solver_options(solver: dict) -> dict:
+    """Translate application settings into backend-specific parameter names."""
+
+    if str(solver["name"]).lower() == "copt":
+        options = {
+            "TimeLimit": float(solver["time_limit_s"]),
+            "RelGap": float(solver["mip_gap"]),
+            "LogToConsole": int(bool(solver["log_to_console"])),
+        }
+        if solver.get("method"):
+            options["LpMethod"] = {"ipm": 2, "simplex": 1, "choose": -1}[
+                str(solver["method"])
+            ]
+        return options
+    options = {
+        "time_limit": float(solver["time_limit_s"]),
+        "mip_rel_gap": float(solver["mip_gap"]),
+        "log_to_console": bool(solver["log_to_console"]),
+    }
+    if solver.get("method"):
+        options["solver"] = str(solver["method"])
+    return options
+
+
 def _record_solver_time(network) -> None:
-    """Accumulate HiGHS native solve seconds, excluding model I/O and postprocessing."""
+    """Accumulate native solve seconds, excluding model I/O and postprocessing."""
 
     if not hasattr(network, "meta"):
         return
     solver = getattr(getattr(network, "model", None), "solver_model", None)
     get_runtime = getattr(solver, "getRunTime", None)
-    elapsed = float(get_runtime()) if get_runtime is not None else None
+    elapsed = (
+        float(get_runtime()) if get_runtime is not None
+        else getattr(solver, "SolvingTime", None)
+    )
     previous = network.meta.get("solver_time_s", 0.0)
     network.meta["solver_time_s"] = (
         previous + elapsed

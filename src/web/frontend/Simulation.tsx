@@ -1,5 +1,5 @@
 import {useEffect,useMemo,useRef,useState} from 'react';
-import {Download,Expand,Shrink,Image,ArrowRight} from 'lucide-react';
+import {Download,Expand,Shrink,Image,ArrowRight,Zap,Gauge,Clock,GitBranch,TriangleAlert,Check} from 'lucide-react';
 import type {EChartsType,EChartsCoreOption} from 'echarts/core';
 import type {Application,RegionalOverview} from './types';
 import {useResource,labels,format,dateLabel,download} from './data';
@@ -69,7 +69,18 @@ export default function Simulation({compact=false,onOpen,onExpandedChange}:{comp
   if(error)return <ErrorState message={error} retry={retry}/>;if(!data)return <Loading/>;
   return <div ref={dialog} tabIndex={-1} role={expanded?'dialog':undefined} aria-modal={expanded?true:undefined} aria-labelledby={expanded?'simulation-chart-title':undefined} className={`simulation ${expanded?'chart-expanded':''}`}>
     {regional.error&&<ErrorState message={regional.error} retry={regional.retry}/>}
-    <div className="simulation-metrics"><div><span>装机容量<TermHelp term="simulationCapacity"/></span><strong>{format(regional.data?.simulation.installed_capacity_mw!=null?regional.data.simulation.installed_capacity_mw/1000:undefined,1)} <small>GW</small></strong></div><div><span>模拟最大负荷<TermHelp term="simulationPeak"/></span><strong>{format(regional.data?.simulation.maximum_load_mw!=null?regional.data.simulation.maximum_load_mw/1000:undefined,1)} <small>GW</small></strong></div><div><span>模拟时长</span><strong>{format(data.time.length)} <small>小时</small></strong></div><div><span>网络范围<TermHelp term="voltage"/></span><strong>{format(data.summary.case_minimum_voltage_kv)} <small>kV+</small></strong></div><div><span>未供电量占比<TermHelp term="unserved"/></span><strong>{format(data.summary.load_shedding_share*100,4)}<small>%</small></strong></div></div>
+    <section className="metric-strip regional-metrics" aria-label="运行模拟关键指标">
+      {([
+        {name:'装机容量',icon:Zap,term:'simulationCapacity',value:format(regional.data?.simulation.installed_capacity_mw == null ? undefined : regional.data.simulation.installed_capacity_mw / 1000,1),unit:'GW'},
+        {name:'最大负荷',icon:Gauge,term:'simulationPeak',value:format(regional.data?.simulation.maximum_load_mw == null ? undefined : regional.data.simulation.maximum_load_mw / 1000,1),unit:'GW'},
+        {name:'模拟时长',icon:Clock,value:format(data.time.length),unit:'小时'},
+        {name:'网络范围',icon:GitBranch,term:'voltage',value:format(data.summary.case_minimum_voltage_kv),unit:'kV+'},
+        {name:'未供电量占比',icon:TriangleAlert,term:'unserved',value:format(data.summary.load_shedding_share * 100,4),unit:'%'},
+       ] as const).map(metric => <div className="metric" key={metric.name}>
+        <span className="metric-label"><metric.icon size={16}/>{metric.name}{'term' in metric && <TermHelp term={metric.term}/>}</span>
+        <strong>{metric.value}<small>{metric.unit}</small></strong>
+      </div>)}
+    </section>
     <section className="panel"><div className="panel-heading"><div><h2 id="simulation-chart-title" className="term-label">电力供需构成<TermHelp term="powerMW"/></h2><span>{dateLabel(data.time[0])} — {dateLabel(data.time.at(-1)!)}</span></div><div className="chart-actions"><select aria-label="模拟时间范围" value={range} onChange={e=>setRange(e.target.value)}><option value="all">完整时段（{format(data.time.length)} 小时）</option><option value="day">首日 24 小时</option></select><button className="icon-button" title="导出当前图表 CSV" aria-label="导出当前图表 CSV" onClick={exportCSV}><Download size={17}/></button><button className="icon-button" title="导出图表图片" aria-label="导出图表图片" onClick={exportPNG}><Image size={17}/></button><button ref={expandButton} className="icon-button" title={expanded?'退出放大':'放大图表'} aria-label={expanded?'退出放大':'放大图表'} onClick={()=>setExpanded(!expanded)}>{expanded?<Shrink size={17}/>:<Expand size={17}/>}</button></div></div>
       <Chart option={option} onReady={c=>{chart.current=c;c.on('legendselectchanged',(event:any)=>setSeriesVisibility(event.selected));}} height={expanded?Math.max(350,window.innerHeight-245):440} label="电力供需时序图，单位 MW；支持缩放与系列显隐"/>
       <div className="simulation-legend" role="group" aria-label="图表系列">
@@ -77,7 +88,7 @@ export default function Simulation({compact=false,onOpen,onExpandedChange}:{comp
           const name=seriesTitle(series,labels[series.id]||series.id);
           return <button type="button" key={`${series.kind}:${series.id}`} aria-pressed={seriesVisibility[name]!==false}
             onClick={()=>chart.current?.dispatchAction({type:'legendToggleSelect',name})}>
-            <i style={{backgroundColor:seriesColor(data,series)}} aria-hidden="true"/>{name}
+            <i style={{backgroundColor:seriesColor(data,series)}} aria-hidden="true"/>{name}<Check className="series-check" size={13} aria-hidden="true"/>
           </button>;
         })}
       </div>
@@ -85,6 +96,5 @@ export default function Simulation({compact=false,onOpen,onExpandedChange}:{comp
     </section>
     {exportStatus&&<p className="export-status" role="status">{exportStatus}</p>}
     {showTable&&<section className="panel"><div className="panel-heading"><h2>逐小时原始功率</h2><span>MW · 全部 {format(data.time.length)} 小时</span></div><div className="data-table-scroll"><table><thead><tr><th>时间</th>{data.series.map(s=><th key={`${s.id}:${s.kind}`}>{labels[s.id]||s.id}{s.kind==='storage_charge'?'（充电）':s.kind==='storage_discharge'?'（放电）':''}</th>)}</tr></thead><tbody>{data.time.map((t,i)=><tr key={t}><th>{dateLabel(t)}</th>{data.series.map(s=><td key={`${s.id}:${s.kind}`}>{format(s.values[i],2)}</td>)}</tr>)}</tbody></table></div></section>}
-    {!expanded&&<details className="simulation-explanation"><summary>计算与图表说明</summary><div className="simulation-notes"><div><h3 className="term-label">如何读这张图<TermHelp term="load"/></h3><p>彩色面积表示不同技术的发电与储能功率，深色线表示负荷。储能充电显示在零线以下；“未供电负荷”表示供需缺口。</p></div><div><h3 className="term-label">计算口径<TermHelp term="rollingHorizon"/></h3><p>{data.summary.solve_mode==='rolling_horizon'?`滚动求解，每个窗口 ${data.summary.rolling_horizon_hours} 小时。`: '整段时序求解。'}求解状态：{data.summary.termination_condition==='optimal'?'最优解':data.summary.termination_condition}。页面读取预先生成的结果，保留原始时间标记。时间标记沿用本地导出结果。</p></div></div></details>}
   </div>;
 }

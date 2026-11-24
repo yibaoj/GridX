@@ -20,9 +20,9 @@ input{caret-color:var(--accent)}
 .province-map-guide>svg{color:var(--accent)}
 .province-map-guide h2{font-size:18px}
 .province-map-guide p{font-size:14px;color:var(--muted);line-height:1.8;max-width:48ch}
-.page-map{max-width:none;padding:22px 24px 24px}
-.page-map .page-heading{margin-bottom:18px}
-.page-map .page-heading p{margin-top:6px}
+
+
+
 .map-toolbar{padding:9px 12px;gap:14px;border-radius:var(--map-control-radius) var(--map-control-radius) 0 0}
 .map-toolbar select{min-height:40px}
 .layer-tabs button{min-height:40px;padding:8px 13px;font-size:13px}
@@ -110,7 +110,7 @@ input{caret-color:var(--accent)}
   .provincial-metrics .metric-sub{font-size:12px}
   .province-map-guide{padding:20px 4px;border:0}
   .scope-select select{min-height:44px;max-width:100%}
-  .page-map{padding:20px 12px}
+
   .map-toolbar{padding:10px}
   .layer-tabs{gap:0}
   .layer-tabs button{font-size:12px;min-height:44px;padding:8px 7px;flex:0 0 auto}

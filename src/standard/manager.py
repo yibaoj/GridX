@@ -12,6 +12,7 @@ import pandas as pd
 import xarray as xr
 
 from ..raw import RawDataManager
+from ..common.io import NETCDF_ENGINE
 from .generator import _GeneratorStandardizer
 from .load import _LoadStandardizer
 from .model import StandardData, StandardNetwork
@@ -210,7 +211,8 @@ class StandardDataManager:
                 options.get("conflict_tolerance", 1e-6)
             )
         else:
-            data = xr.open_dataset(paths[0], chunks="auto")
+            # Respect on-disk chunks; mapping bounds time blocks before expansion.
+            data = xr.open_dataset(paths[0], engine=NETCDF_ENGINE, chunks={})
         if dataset_id == "population":
             data["class"] = "cell_population"
             data["geometry_method"] = "aggregated_source_cell"

@@ -13,6 +13,7 @@ from shapely.geometry import box
 import xarray as xr
 
 from ..standard import polygonal_geometry
+from ..standard.schema import TIME_CHUNK_SIZE
 
 
 def aggregate_extensive(
@@ -95,7 +96,7 @@ def map_timeseries_to_cells(
         tolerance=conservation_tolerance,
     )
     values = data[variable].transpose("time", "uid", "class").data
-    values = da.asarray(values).rechunk({1: -1})
+    values = da.asarray(values).rechunk({0: TIME_CHUNK_SIZE, 1: -1})
     mapped = da.map_blocks(
         _sparse_dot,
         values,
@@ -126,6 +127,9 @@ def map_timeseries_to_cells(
             "spatial_method": method,
         },
     )
+    for name, coordinate in data.coords.items():
+        if name != "time" and coordinate.dims == ("time",):
+            result = result.assign_coords({name: coordinate})
     covered = xr.DataArray(
         np.isin(target_uids, crosswalk["spatial_uid"].unique()),
         dims="uid",

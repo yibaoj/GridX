@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import xarray as xr
+from ...common.io import NETCDF_ENGINE
 
 from ...case import PowerSystemCase
 from .model import UnitCommitmentResult
@@ -108,7 +109,7 @@ def save_result(result: UnitCommitmentResult, root: Path) -> None:
         name: {"zlib": True, "complevel": 4}
         for name in result.data.data_vars
     }
-    result.data.to_netcdf(temporary, encoding=encoding)
+    result.data.to_netcdf(temporary, engine=NETCDF_ENGINE, encoding=encoding)
     temporary.replace(path)
     (root / "summary.json").write_text(
         json.dumps(
@@ -123,7 +124,7 @@ def save_result(result: UnitCommitmentResult, root: Path) -> None:
 def load_result(case: PowerSystemCase, root: Path) -> UnitCommitmentResult:
     """Load a saved operation result without re-running optimization."""
 
-    data = xr.open_dataset(root / "timeseries.nc", chunks="auto")
+    data = xr.open_dataset(root / "timeseries.nc", engine=NETCDF_ENGINE, chunks="auto")
     summary = pd.Series(
         json.loads((root / "summary.json").read_text(encoding="utf-8")),
         name="value",

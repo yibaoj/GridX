@@ -54,6 +54,17 @@ def validate_payload(relative: str, payload: dict) -> None:
             for field in fields.get(layer, ()):
                 if field not in feature['properties']:
                     raise ValueError(f'{relative}: feature is missing {field}')
+        if layer == 'load' and 'annual_peak' in payload['summary']:
+            peak = payload['summary']['annual_peak']
+            if not isinstance(peak, dict) or not isinstance(peak.get('complete_year'), bool):
+                raise ValueError(f'{relative}: annual_peak requires complete_year')
+            if peak['complete_year']:
+                for item in [peak, *[feature['properties'] for feature in geojson['features']]]:
+                    value = item.get('peak_load_mw')
+                    if not isinstance(value, (float, int)) or not math.isfinite(value) or value < 0:
+                        raise ValueError(f'{relative}: peak_load_mw must be finite nonnegative MW')
+                    if not isinstance(item.get('peak_timestamp'), str):
+                        raise ValueError(f'{relative}: peak_timestamp must be a timestamp string')
     if name == 'uc.json.gz':
         for series in payload['series']:
             if not isinstance(series, dict) or not isinstance(series.get('id'), str) or not isinstance(series.get('kind'), str):

@@ -1,4 +1,4 @@
-"""Historical electric-load standardization."""
+"""Merge historical and scenario electric-load workbooks."""
 
 from __future__ import annotations
 
@@ -48,35 +48,46 @@ class _LoadStandardizer(_Standardizer):
     }
 
     def build(self) -> xr.Dataset:
-        source_id = self.config["source_ids"][0]
-        file_path = self.source(source_id)
-        sheets = pd.ExcelFile(file_path, engine="openpyxl").sheet_names
-        by_year = {
-            int(match.group()): sheet
-            for sheet in sheets
-            if (match := re.search(r"20(?:1[5-9]|2[0-4])", sheet))
-        }
+        source_ids = self.config["source_ids"]
+        years = set(self.options["years"])
+        found_years: set[int] = set()
         frames = []
+        provenance = []
         raw_names: list[str] | None = None
-        for year in self.options["years"]:
-            if year not in by_year:
-                raise ValueError(f"Load workbook is missing year {year}.")
-            frame = pd.read_excel(
-                file_path,
-                sheet_name=by_year[year],
-                index_col=0,
-                parse_dates=[0],
-            )
-            frame.index = pd.DatetimeIndex(pd.to_datetime(frame.index), name="time")
-            if raw_names is None:
-                raw_names = [
-                    str(column).split(" (", 1)[0].strip() for column in frame.columns
-                ]
-            frame.columns = [
-                self._PROVINCES[str(column).split(" (", 1)[0].strip()]
-                for column in frame.columns
-            ]
-            frames.append(frame.apply(pd.to_numeric, errors="coerce"))
+        for source_id in source_ids:
+            with pd.ExcelFile(self.source(source_id), engine="openpyxl") as book:
+                for sheet in book.sheet_names:
+                    match = re.search(r"(?<!\d)(20\d{2})(?!\d)", sheet)
+                    if not match or (year := int(match.group())) not in years:
+                        continue
+                    if year in found_years:
+                        raise ValueError(f"Multiple load sheets provide year {year}.")
+                    frame = pd.read_excel(
+                        book, sheet_name=sheet, index_col=0, parse_dates=[0]
+                    )
+                    frame.index = pd.DatetimeIndex(
+                        pd.to_datetime(frame.index), name="time"
+                    )
+                    if not (frame.index.year == year).all():
+                        raise ValueError(
+                            f"Load sheet {sheet!r} contains timestamps outside {year}."
+                        )
+                    names = [
+                        str(column).split(" (", 1)[0].strip()
+                        for column in frame.columns
+                    ]
+                    if raw_names is None:
+                        raw_names = names
+                    if len(set(names)) != len(names) or set(names) != set(raw_names):
+                        raise ValueError("Load sources have inconsistent province columns.")
+                    frame.columns = names
+                    frame = frame.reindex(columns=raw_names)
+                    frame.columns = [self._PROVINCES[name] for name in raw_names]
+                    frames.append(frame.apply(pd.to_numeric, errors="coerce"))
+                    provenance.append(pd.Series(source_id, index=frame.index))
+                    found_years.add(year)
+        if missing := years.difference(found_years):
+            raise ValueError(f"Load workbooks are missing years {sorted(missing)}.")
         load = pd.concat(frames).sort_index()
         if load.index.has_duplicates or load.isna().any().any():
             raise ValueError("Load timestamps or values are incomplete.")
@@ -102,6 +113,9 @@ class _LoadStandardizer(_Standardizer):
                 "time": load.index.to_numpy(),
                 "uid": uid,
                 "class": ["electric_load"],
+                "load_source_id": (
+                    "time", pd.concat(provenance).reindex(load.index).to_numpy()
+                ),
                 "location": ("uid", region_names),
                 "geometry": ("uid", geometry),
                 "geometry_method": (
@@ -114,7 +128,7 @@ class _LoadStandardizer(_Standardizer):
                 "time_step": self.options["interval"],
                 "source_unit": "GWh per hourly interval",
                 "unit": "MW",
-                "source_id": source_id,
+                "source_id": ";".join(source_ids),
                 "crs": spatial.crs.to_string(),
             },
         )

@@ -133,6 +133,7 @@ class RawDataManager:
                 ):
                     continue
                 try:
+                    self._downloader.validate(source, candidate)
                     path.parent.mkdir(parents=True, exist_ok=True)
                     candidate.replace(path)
                 except Exception as error:

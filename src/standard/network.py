@@ -30,11 +30,12 @@ from .network_model import (
     voltage_station_subclass,
 )
 from .model import StandardNetwork
+from .time import network_validity
+from .network_overlay import append_network_sources
 from .schema import (
     _finalize_frame,
     _numeric,
     _osm_voltages,
-    _partial_time,
     _write_geodataframe,
 )
 
@@ -103,6 +104,8 @@ class _NetworkStandardizer(_Standardizer):
             observed_at,
         )
         network = build_electrical_network(nodes, branches)
+        if len(self.config["source_ids"]) > 1:
+            network = append_network_sources(self, network)
         for component in ("bus", "branch", "transformer", "converter"):
             _write_geodataframe(
                 getattr(network, component), self.output() / f"{component}.parquet"
@@ -181,6 +184,8 @@ class _NetworkStandardizer(_Standardizer):
             "start_date",
             "opening_date",
             "closing_date",
+            "construction_date",
+            "end_date",
             *(key for _, key in self._LIFECYCLE_KEYS),
         }
         available = set(
@@ -415,12 +420,8 @@ class _NetworkStandardizer(_Standardizer):
                         "geometry": LineString(coordinates),
                         "geometry_method": "source_geometry",
                         "observed_at": observed_at,
-                        "valid_from": _partial_time(
-                            line.start_date if hasattr(line, "start_date") else pd.NA
-                        ),
-                        "valid_to": _partial_time(
-                            line.closing_date if hasattr(line, "closing_date") else pd.NA
-                        ),
+                        "valid_from": network_validity(line)[0],
+                        "valid_to": network_validity(line)[1],
                         "source_id": source_id,
                         "source_uid": line_uid.removeprefix("osm:"),
                         "name": line.name,

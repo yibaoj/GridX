@@ -13,7 +13,7 @@ mapping_config = "config/mapping.toml"
 case_config = "config/case.toml"
 uc_config = "config/uc.toml"
 output_root = "outputs/web/data"
-plot_year = 2024
+plot_year = 2025
 geometry_simplify_degrees = 0.01
 
 [map]

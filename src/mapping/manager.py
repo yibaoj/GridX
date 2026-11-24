@@ -6,17 +6,21 @@ from collections.abc import Iterable
 from pathlib import Path
 import tomllib
 
+import dask
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import xarray as xr
 
 from ..standard import DATASET_IDS, StandardNetwork, StandardDataManager
+from ..common.io import NETCDF_ENGINE
 from ..standard.parameter import (
     DEFAULT_QUALITY_ORDER,
     as_parameter_data,
 )
 from ..standard.plot import PlotResult
+from ..standard.schema import _write_xarray
+from ..standard.time import validity_mask
 from .cell import build_spatial_cells
 from .model import MappedData, MappedNetwork
 from .network import (
@@ -76,6 +80,8 @@ class SpatiotemporalMappingManager:
         with path.open("rb") as file:
             self.config = tomllib.load(file)
         self.options = self.config["general"]
+        if "at" in self.options:
+            raise ValueError("Move mapping [general].at to [spatial].at and/or [population].at.")
         self.outputs = {
             name: self.project_root / self.options["output_root"] / filename
             for name, filename in self.config["outputs"].items()
@@ -88,7 +94,7 @@ class SpatiotemporalMappingManager:
         """Build only the clipped standard spatial cells."""
 
         cells = build_spatial_cells(
-            self.standard_data.load("spatial"),
+            self._spatial_snapshot("spatial"),
             self.config["cell"],
             metric_crs=self.options["metric_crs"],
             project_root=self.project_root,
@@ -97,10 +103,24 @@ class SpatiotemporalMappingManager:
         self._write_geodataframe("spatial", cells)
         return cells
 
-    def build_network(self) -> StandardNetwork:
-        """Return the largest connected subgraph of the standard network."""
+    def _spatial_snapshot(self, dataset_id):
+        data = self.standard_data.load(dataset_id)
+        at = self.config.get(dataset_id, {}).get("at")
+        if at:
+            data = data.loc[validity_mask(data, at)].copy()
+            if data.empty:
+                raise ValueError(f"{dataset_id} has no records valid at {at}; select another source.")
+        return data
 
-        return largest_connected_network(self.standard_data.load("network"))
+    def build_network(self) -> StandardNetwork:
+        """Retain every time version; mark connectivity without pruning assets."""
+
+        network = self.standard_data.load("network")
+        largest = largest_connected_network(network)
+        for name in ("bus", "branch", "transformer", "converter"):
+            frame = getattr(network, name)
+            frame["in_largest_connected_graph"] = frame.uid.isin(getattr(largest, name).uid)
+        return network
 
     def build(
         self,
@@ -305,7 +325,7 @@ class SpatiotemporalMappingManager:
         auxiliary_dataset = str(load_options.get("auxiliary_dataset", ""))
         population = None
         if "population" in pending:
-            population_source = self.standard_data.load("population")
+            population_source = self._spatial_snapshot("population")
             population = aggregate_extensive(
                 population_source,
                 cells,
@@ -615,16 +635,13 @@ class SpatiotemporalMappingManager:
     def _write_xarray(self, name: str, data: xr.Dataset, variable: str) -> None:
         path = self.outputs[name]
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(f"{path.suffix}.tmp")
-        data.to_netcdf(
-            temporary,
-            encoding={variable: {"zlib": True, "complevel": 4}},
-        )
-        temporary.replace(path)
+        # netCDF4/HDF5 can segfault when worker reads overlap main-thread writes.
+        with dask.config.set(scheduler="synchronous"):
+            _write_xarray(data, path, variable)
 
     def _read_xarray(self, name: str, dataset_id: str) -> xr.Dataset:
         data = xr.open_dataset(
-            self.outputs[name], chunks="auto", drop_variables=["geometry"]
+            self.outputs[name], engine=NETCDF_ENGINE, chunks={}, drop_variables=["geometry"]
         )
         if "spatial_uid" not in data.coords:
             data = data.assign_coords(

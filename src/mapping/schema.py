@@ -32,7 +32,7 @@ _DESCRIPTIONS = {
     "overlap_length_km": "Branch length contained in the standard cell.",
     "branch_length_share": "Share of total branch length contained in the cell.",
     "mapping_status": "Whether the branch intersects the spatial-cell domain.",
-    "in_largest_connected_graph": "Whether the object is in the retained network.",
+    "in_largest_connected_graph": "Membership in the unfiltered largest graph; mapping retains other components too.",
 }
 
 _REQUIRED = {

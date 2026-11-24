@@ -1546,13 +1546,9 @@ def _selector_matches(actual: object, condition: object) -> bool:
 
 
 def _active_at(row: pd.Series, value: object) -> bool:
-    timestamp = pd.Timestamp(value)
-    timestamp = timestamp.tz_localize("UTC") if timestamp.tzinfo is None else timestamp.tz_convert("UTC")
-    if pd.notna(row.get("valid_from")) and timestamp < time_bounds(row["valid_from"])[0]:
-        return False
-    if pd.notna(row.get("valid_to")) and timestamp >= time_bounds(row["valid_to"])[1]:
-        return False
-    return True
+    from .time import active_at
+
+    return active_at(row, value)
 
 
 def _time_rank(value: object) -> int:

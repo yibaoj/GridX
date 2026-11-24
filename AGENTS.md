@@ -41,6 +41,11 @@
 - Keep `source_id` stable and preserve source URLs, versions, and providers.
   Use the catalog's canonical `local_path`; do not create dynamic variables
   from source IDs. Declare dataset dependencies in the standard configuration.
+- Include verified snapshot dates or source reference years in raw filenames
+  and update the catalog and all path references together. Do not add temporal
+  fields inside raw files. Never infer dates from filesystem timestamps or
+  present release/reference years as observation dates. Keep undated names when
+  dates are unknown and validate dated OSM snapshots before replacement.
 - Store shared asset classification in `config/class_mapping.csv`; evaluate
   rules by ascending priority, keep the first match, and retain `mapping_rule_id`.
   Use configured source adapters and explicit source-specific mapping files

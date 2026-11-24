@@ -8,10 +8,10 @@ import pandas as pd
 
 from .asset_mapping import _asset_in_scope, _GemMixin
 from .base import _Standardizer
+from .time import valid_time
 from .schema import (
     _finalize_frame,
     _nullable_boolean,
-    _partial_time,
     _points,
     _snake_case,
     _write_geodataframe,
@@ -20,8 +20,10 @@ from .schema import (
 
 class _GeneratorStandardizer(_Standardizer, _GemMixin):
     def build(self) -> gpd.GeoDataFrame:
-        source_id = self.config["source_ids"][0]
-        frame = self._gem_records(source_id, self.options["sheet"])
+        frame = pd.concat([
+            self._gem_records(source, self.options["sheet"]).assign(_source_id=source)
+            for source in self.config["source_ids"]
+        ], ignore_index=True)
         frame = frame.loc[[
             _asset_in_scope(
                 row["Country/area"], row["Status"],
@@ -56,14 +58,14 @@ class _GeneratorStandardizer(_Standardizer, _GemMixin):
             "geometry_method": np.where(
                 longitude.notna() & latitude.notna(), "source_coordinates", pd.NA
             ),
-            "observed_at": self.source_observed_at(source_id),
+            "observed_at": frame["_source_id"].map(self.source_observed_at),
             "valid_from": frame.get("Start year", pd.Series(pd.NA, index=frame.index)).map(
-                _partial_time
+                valid_time
             ),
             "valid_to": frame.get("Retired year", pd.Series(pd.NA, index=frame.index)).map(
-                _partial_time
+                valid_time
             ),
-            "source_id": source_id,
+            "source_id": frame["_source_id"],
             "source_uid": frame["GEM unit/phase ID"],
             "mapping_rule_id": classification["mapping_rule_id"],
             "project_uid": "gem:" + frame["GEM location ID"].astype("string"),

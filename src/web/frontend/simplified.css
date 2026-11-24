@@ -66,7 +66,7 @@
 .simulation-metrics .term-help{display:inline-flex;margin:0}
 .simulation-metrics strong{display:flex;align-items:baseline;gap:5px;font-size:26px;line-height:1.2;white-space:nowrap}
 .simulation-metrics small{font-size:13px}
-.simulation-legend{display:flex;flex-wrap:wrap;gap:2px 5px;padding:0 17px 10px}
+.simulation-legend{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 10px;padding:8px 17px 14px}
 .simulation-legend button{display:flex;align-items:center;gap:5px;min-height:28px;padding:3px 5px;border-radius:4px;white-space:nowrap;font-size:12px;color:var(--ink)}
 .simulation-legend button:hover{background:var(--accent-soft)}
 .simulation-legend i{display:block;flex:none;width:7px;height:7px;border-radius:50%}
@@ -131,22 +131,82 @@
   .simulation-metrics strong{font-size:24px}
 }
 
-/* Shared typography hierarchy for the light workspace. */
-:root{font-family:"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased}
-h1,h2,h3,.region-picker select{font-weight:700;letter-spacing:-.025em;line-height:1.25}
-h1,.region-picker select{font-size:28px}
-h2,.overview-grid .panel-heading h2{font-size:18px;font-weight:700}
-h3{font-size:15px;font-weight:650}
-.brand{font-size:25px;font-weight:750;letter-spacing:-.045em}
-.sidebar nav a,.sidebar nav button{font-weight:600;letter-spacing:-.01em}
+/* Shared text levels: page, section, subsection/navigation, body, secondary. */
+:root{font-family:"Oxygen","PingFang SC","Microsoft YaHei",sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased;--type-page:28px;--type-section:18px;--type-subsection:15px;--type-body:14px;--type-secondary:12px;--type-metric:32px}
+.leaflet-container,.maplibregl-map{font-family:inherit}
+h1,h2,h3,.region-picker select{color:var(--ink);font-weight:700;letter-spacing:-.015em;line-height:1.3}
+h1,.overview-title h1,.region-picker select{font-size:var(--type-page)}
+h2,.panel-heading h2,.overview-grid .panel-heading h2,.news-list-heading h2,.learn-intro h2,.detail-panel h2{font-size:var(--type-section);font-weight:700}
+h3,.panel-heading h3,.guide-grid h3,.workflow-list h3,.simulation-notes h3,.detail-panel h3,.news-article h3,.news-empty h3{font-size:var(--type-subsection);font-weight:700}
+.brand,.brand strong{font-size:25px;font-weight:700;letter-spacing:-.035em}
+.sidebar nav a,.sidebar nav button,.content-tabs button,.layer-tabs button,.news-categories button{font-size:var(--type-body);font-weight:700;letter-spacing:0;line-height:1.5}
+.sidebar nav a{color:var(--ink)}
+.sidebar nav a.active,.content-tabs button.active,.layer-tabs button.active,.news-categories button[aria-pressed="true"]{color:var(--accent);font-weight:700}
 .sidebar-brand-row .brand{padding-bottom:24px}
 .panel-heading{padding-block:20px}
 .panel-heading>div>span,.metric-label,.chart-footnote{line-height:1.55}
-.regional-metrics .metric>strong,.simulation-metrics strong{font-size:32px;font-weight:700;letter-spacing:-.04em;line-height:1.15;font-variant-numeric:tabular-nums lining-nums}
-.regional-metrics .metric small,.simulation-metrics strong small{font-size:12px;font-weight:500;letter-spacing:0}
-.regional-metrics .metric-label{font-size:13px;font-weight:500}
-.province-table th,.data-table-scroll th{font-size:12px;font-weight:600;letter-spacing:.015em}
-.province-table td{font-size:14px;line-height:1.5}
-.province-table .numeric{font-weight:600;letter-spacing:-.015em}
-.button,.layer-tabs button,.page-actions button{font-weight:600}
-@media(max-width:700px){h1,.region-picker select{font-size:24px}.regional-metrics .metric>strong,.simulation-metrics strong{font-size:26px}.overview-grid .panel-heading h2{font-size:16px}}
+.learn-intro p,.guide-grid p,.workflow-list p,.simulation-notes p,.news-intro,.news-article p,.detail-panel>p,.detail-row,.detail-meta>div,.panel-note,.province-table td,.data-table-scroll td{font-size:var(--type-body);font-weight:400;line-height:1.6}
+.panel-heading>div>span,.metric-label,.chart-footnote,.news-article-meta,.news-source,.news-list-heading>span,.news-list-footer,.sidebar-bottom>a,.detail-row small,.detail-panel>code,.map-caption{font-size:var(--type-secondary);font-weight:400;color:var(--muted);line-height:1.55}
+.news-article h3 a{color:inherit}
+.news-article h3 a:hover{color:var(--accent)}
+.regional-metrics .metric>strong,.simulation-metrics strong{color:var(--ink);font-size:var(--type-metric);font-weight:700;letter-spacing:-.025em;line-height:1.15;font-variant-numeric:tabular-nums lining-nums}
+.regional-metrics .metric small,.simulation-metrics strong small{font-size:var(--type-secondary);font-weight:400;letter-spacing:0}
+.regional-metrics .metric-label{font-size:var(--type-secondary);font-weight:400}
+.province-table th,.data-table-scroll th{font-size:var(--type-secondary);font-weight:700;color:var(--muted);letter-spacing:0}
+.province-table .numeric{font-weight:700;letter-spacing:0}
+.button,.page-actions button{font-weight:700}
+@media(max-width:700px){:root{--type-page:24px;--type-section:16px;--type-metric:26px}}
+
+/* Shared workspace and visible content hierarchy. */
+.page-content {
+  --workspace-inline: 32px;
+  --workspace-top: 28px;
+  max-width: none;
+  width: 100%;
+  min-width: 0;
+  min-height: 100dvh;
+  padding: var(--workspace-top) var(--workspace-inline) 32px;
+}
+
+.page-map .map-main {
+  height: calc(100dvh - 118px);
+}
+
+.page-content :is(h2, .news-data-reference > summary, .simulation-explanation > summary) {
+  font-size: var(--type-section);
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.35;
+}
+
+.page-content h3 {
+  font-size: var(--type-subsection);
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.page-content :is(.news-empty p, .map-search input, .news-search input, .map-toolbar select) {
+  font-size: var(--type-body);
+}
+
+@media (max-width: 1000px) {
+  .page-content { --workspace-inline: 20px; }
+}
+
+@media (max-width: 700px) {
+  .page-content { --workspace-inline: 14px; --workspace-top: 14px; }
+  .mobile-navigation { margin-bottom: 12px; }
+  .page-map .map-main { height: calc(100dvh - 176px); }
+}
+
+.chart-expanded > .regional-metrics { display: none; }
+.simulation-legend .series-check { color: var(--accent); }
+.simulation-legend button[aria-pressed="false"] .series-check { visibility: hidden; }
+.map-toolbar #stage {
+  appearance: none;
+  padding-inline-end: 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m2.5 4.5 3.5 3.5 3.5-3.5' fill='none' stroke='%235d6c65' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}

@@ -40,7 +40,8 @@ class DashboardDataTests(unittest.TestCase):
                     breakdown={"coal": 30}),
         ]
         branch = feature("line1", {"type": "LineString", "coordinates": [[2, 2], [8, 2]]},
-                         feature_kind="branch", voltage_kv=1000, current_type="AC")
+                         feature_kind="branch", voltage_kv=1000, current_type="AC",
+                         source_id="osm", source_uid="way:1")
         self.inputs = {
             "manifest.json.gz": {"year": 2025, "stages": ["standard", "case"],
                                  "layers": ["generator", "load", "network"], "resource_classes": []},
@@ -75,9 +76,87 @@ class DashboardDataTests(unittest.TestCase):
         self.assertEqual(regional["provinces"]["load-A"]["installed_capacity_mw"], 100)
         self.assertEqual(regional["coverage"]["unassigned_capacity_mw"], 50)
         self.assertEqual(regional["national"]["uhv_branch_count"], 1)
+        self.assertEqual(regional["national"]["uhv_source_count"], 1)
         self.assertEqual(regional["provinces"]["load-A"]["uhv_branch_count"], 1)
         self.assertEqual(regional["simulation"]["maximum_load_mw"], 120)
         self.assertIsNone(regional["national"]["peak_load_mw"])
+
+    def test_annual_peak_is_exported_separately_from_simulation_peak(self):
+        load = self.inputs["layers/standard/load.json.gz"]
+        load["summary"]["annual_peak"] = dict(complete_year=True, peak_load_mw=200,
+            peak_timestamp="2025-07-10T15:00:00", timezone="Asia/Shanghai")
+        load["geojson"]["features"][0]["properties"].update(
+            peak_load_mw=150, peak_timestamp="2025-08-10T16:00:00")
+        atomic_json(self.root / "layers/standard/load.json.gz", load)
+        regional = read_payload(prepare_dashboard(self.root)["regional-overview"])
+        self.assertEqual(regional["national"]["peak_load_mw"], 200)
+        self.assertEqual(regional["provinces"]["load-A"]["peak_load_mw"], 150)
+        self.assertEqual(regional["national"]["peak_timestamp"], "2025-07-10T15:00:00")
+        self.assertEqual(regional["simulation"]["maximum_load_mw"], 120)
+
+    def test_uhv_source_count_merges_split_branches_but_preserves_distinct_ways(self):
+        network = self.inputs["layers/standard/network.json.gz"]
+        split = copy.deepcopy(network["geojson"]["features"][0])
+        split["properties"]["uid"] = "line1:second-segment"
+        network["geojson"]["features"].append(split)
+        other = copy.deepcopy(split)
+        other["properties"].update(uid="line2", source_uid="way:2")
+        network["geojson"]["features"].append(other)
+        atomic_json(self.root / "layers/standard/network.json.gz", network)
+        regional = read_payload(prepare_dashboard(self.root)["regional-overview"])
+        self.assertEqual(regional["national"]["uhv_branch_count"], 3)
+        self.assertEqual(regional["national"]["uhv_source_count"], 2)
+        self.assertEqual(regional["provinces"]["load-A"]["uhv_source_count"], 2)
+
+    def test_legacy_network_does_not_present_branch_count_as_source_count(self):
+        network = self.inputs["layers/standard/network.json.gz"]
+        for item in network["geojson"]["features"]:
+            item["properties"].pop("source_uid")
+        atomic_json(self.root / "layers/standard/network.json.gz", network)
+        regional = read_payload(prepare_dashboard(self.root)["regional-overview"])
+        self.assertEqual(regional["national"]["uhv_branch_count"], 1)
+        self.assertIsNone(regional["national"]["uhv_source_count"])
+        self.assertEqual(regional["national"]["uhv_unidentified_branch_count"], 1)
+
+    def test_uhv_counts_exclude_lines_outside_the_exported_provinces(self):
+        network = self.inputs["layers/standard/network.json.gz"]
+        outside = copy.deepcopy(network["geojson"]["features"][0])
+        outside["properties"].update(uid="outside", source_uid="way:outside")
+        outside["geometry"]["coordinates"] = [[20, 20], [25, 25]]
+        network["geojson"]["features"].append(outside)
+        atomic_json(self.root / "layers/standard/network.json.gz", network)
+        regional = read_payload(prepare_dashboard(self.root)["regional-overview"])
+        self.assertEqual(regional["national"]["uhv_branch_count"], 1)
+        self.assertEqual(regional["national"]["uhv_source_count"], 1)
+
+    def test_builder_exports_simultaneous_peak_and_rejects_partial_year_peak(self):
+        import numpy as np
+        import pandas as pd
+        import xarray as xr
+        from .build import WebDataBuilder
+
+        times = pd.date_range("2025-01-01", "2026-01-01", freq="h", inclusive="left")
+        demand = np.tile([10.0, 20.0], (len(times), 1))
+        demand[1] = [100, 20]
+        demand[2] = [50, 80]
+        data = xr.Dataset(
+            {"demand_mw": (("time", "uid", "class"), demand[:, :, None])},
+            coords={"time": times, "uid": ["A", "B"], "class": ["electric_load"],
+                    "geometry": ("uid", ["POINT (1 1)", "POINT (2 2)"])},
+            attrs=dict(crs="EPSG:4326", timezone="Asia/Shanghai", time_step="1h", source_id="test"))
+        builder = WebDataBuilder.__new__(WebDataBuilder)
+        builder.year = 2025
+        with patch.object(builder, "_dataset", return_value=data):
+            payload = builder._timeseries("standard", "load")
+        peak = payload["summary"]["annual_peak"]
+        self.assertTrue(peak["complete_year"])
+        self.assertEqual(peak["peak_load_mw"], 130)
+        self.assertEqual(peak["peak_timestamp"], "2025-01-01T02:00:00")
+        self.assertEqual([f["properties"]["peak_load_mw"] for f in payload["geojson"]["features"]], [100, 80])
+        with patch.object(builder, "_dataset", return_value=data.isel(time=slice(0, 24))):
+            partial = builder._timeseries("standard", "load")
+        self.assertFalse(partial["summary"]["annual_peak"]["complete_year"])
+        self.assertIsNone(partial["summary"]["annual_peak"]["peak_load_mw"])
 
     def test_changed_export_creates_a_new_snapshot_and_preserves_the_previous(self):
         old = prepare_dashboard(self.root)

@@ -29,7 +29,6 @@ export default function News() {
   const reset=()=>{setCategory('全部');setQuery('');};
 
   return <section className="news" aria-label="电力与能源资讯">
-    <p className="news-intro">关注电网建设、新能源发展与电力科研进展。</p>
     <div className="panel news-panel">
       <div className="news-toolbar">
         <div className="news-categories" role="group" aria-label="新闻分类">

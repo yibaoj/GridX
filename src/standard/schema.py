@@ -13,6 +13,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import xarray as xr
 from shapely.geometry import Point
+from ..common.io import NETCDF_ENGINE
 
 DATASET_IDS = (
     "spatial",
@@ -24,6 +25,9 @@ DATASET_IDS = (
     "population",
     "resource",
 )
+
+# Bound dense time-series blocks before spatial expansion or aggregation.
+TIME_CHUNK_SIZE = 100
 
 __all__ = [
     "DATASET_IDS",
@@ -117,6 +121,7 @@ XARRAY_SCHEMAS = {
         "coordinates": (
             "time", "uid", "class", "location", "geometry", "geometry_method",
         ),
+        "optional_coordinates": ("load_source_id",),
         "attributes": (
             *REQUIRED_ATTRIBUTES["load"], "timezone", "time_step",
             "source_unit", "unit", "source_id",
@@ -128,6 +133,7 @@ XARRAY_SCHEMAS = {
         "coordinates": (
             "time", "uid", "class", "location", "geometry", "geometry_method",
         ),
+        "optional_coordinates": ("weather_source_id",),
         "attributes": (
             *REQUIRED_ATTRIBUTES["resource"], "timezone", "time_step",
             "source_unit", "unit", "source_id",
@@ -175,7 +181,7 @@ FIELD_DESCRIPTIONS = {
     "geometry_method": "Method used to obtain or infer the geometry.",
     "observed_at": "Time at which the source record was observed.",
     "valid_from": "Inclusive start of the record's validity.",
-    "valid_to": "End of the record's validity.",
+    "valid_to": "Last valid period, inclusive at its stated date precision.",
     "source_id": "Raw-data catalog identifier.",
     "source_uid": "Identifier of the originating source record.",
     "mapping_rule_id": "Classification rule that produced class and subclass.",
@@ -205,6 +211,8 @@ FIELD_DESCRIPTIONS = {
     "crs": "Coordinate reference system used by geometry values.",
     "demand_mw": "Electrical demand in MW.",
     "availability_pu": "Resource availability per unit of installed capacity.",
+    "weather_source_id": "Raw weather source identifier for each timestamp.",
+    "load_source_id": "Raw load source identifier for each timestamp.",
     "spatial_uid": "UID of the standard spatial cell.",
     "spatial_level": "Level of the spatial unit used to clip the cell.",
     "admin_uid": "UID of the spatial unit used to clip the cell.",
@@ -653,11 +661,16 @@ def _validate_xarray(data: xr.Dataset, dataset_id: str) -> None:
             f"{dataset_id} dimensions must be {schema['dimensions']}, "
             f"not {tuple(data.sizes)}."
         )
-    if set(data.coords) != set(schema["coordinates"]):
+    required_coordinates = set(schema["coordinates"])
+    allowed_coordinates = required_coordinates | set(schema.get("optional_coordinates", ()))
+    if not required_coordinates.issubset(data.coords) or set(data.coords) - allowed_coordinates:
         raise ValueError(
             f"{dataset_id} coordinates must be {schema['coordinates']}, "
             f"not {tuple(data.coords)}."
         )
+    for coordinate in schema.get("optional_coordinates", ()):
+        if coordinate in data.coords and data[coordinate].dims != ("time",):
+            raise ValueError(f"{dataset_id}.{coordinate} must be indexed only by time.")
     if set(data.data_vars) != {variable}:
         raise ValueError(f"{dataset_id} must contain only data variable {variable!r}.")
     if data[variable].dims != schema["dimensions"]:
@@ -728,9 +741,17 @@ def _write_dataframe(frame: pd.DataFrame, path: Path) -> None:
 def _write_xarray(data: xr.Dataset, path: Path, variable: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = path.with_suffix(f"{path.suffix}.tmp")
+    encoding = {"zlib": True, "complevel": 4}
+    values = data[variable]
+    chunks = list(values.shape if values.chunks is None else [part[0] for part in values.chunks])
+    if "time" in values.dims:
+        axis = values.dims.index("time")
+        chunks[axis] = min(chunks[axis], TIME_CHUNK_SIZE)
+    encoding["chunksizes"] = tuple(chunks)
     data.to_netcdf(
         temporary_path,
-        encoding={variable: {"zlib": True, "complevel": 4}},
+        engine=NETCDF_ENGINE,
+        encoding={variable: encoding},
     )
     temporary_path.replace(path)
 

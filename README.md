@@ -149,14 +149,68 @@ era5_file = raw_data.get_file("era5_china_2024")
 
 ```bash
 ./config/prepare_osm_power_network.sh \
-  data/osm/china-latest.osm.pbf \
+  data/osm/china-2026-07-16.osm.pbf \
   data/osm/china-power-network
 ```
 
 ERA5下载需要接受CDS许可并配置`~/.cdsapirc`。年份、范围和特征由
 `raw_data_sources.csv`的`options_json`控制。
 
+已下载的CDS逐小时ERA5单层GRIB可离线转换为现有atlite Cutout格式，无需再次请求CDS：
+
+```python
+from src.raw.era5 import convert_era5_grib
+convert_era5_grib("data/era5/era5_china_2025.grib", "data/era5/era5_china_2025.nc")
+```
+
+转换需要完整的风、辐射、温度、径流13个原始字段，保留GRIB原件，分块写入NC；
+仅支持CDS逐小时单层产品的一小时累计量，不适用于ERA5-Land或未去累计的预报产品。
+普通GRIB转NC只改变容器，不能直接替代atlite需要的风速、辐射分量、太阳位置等处理。
+`[datasets.resource].source_ids`可列出多个同网格ERA5 Cutout，标准层按时间排序合并，
+重叠时间或不同网格明确报错。空间UID采用稳定的`era5:纬度:经度`，`weather_source_id(time)`
+记录每小时来源。径流代理的设计流量分位数按合并后的参考时段计算；追加年份可能改变径流容量因子。
+修改来源后依次重建resource标准数据、mapping及case；Load仍需另外提供对应年份，新增气象不等于新增负荷。
+
+已确认快照日期或数据参考年份的原始文件在文件名中保留时间，修改时同步目录和路径引用，
+不向文件内部添加字段。发布日期、覆盖年份不等同于观测日期，未知日期不以文件修改时间推断。
+当前OSM快照为`2026-07-16T20:21:30Z`；检查和下载均以PBF头部核对目录`version`中的日期。
+`latest`链接返回其他日期时会拒绝覆盖，须登记新日期和新路径。海上风电潜力文件名中的
+`2021`是来源版本年份，EEZ文件名中的`2023-10-25`是v12版本日期。
+
 ## 标准数据层
+
+时间有效期统一保留`valid_from`、`valid_to`，空边界不限制时间。Network起始日期依次取
+`start_date`、`opening_date`、`construction_date`，结束日期依次取`end_date`、`closing_date`；
+Bus和站内推断的Transformer/Converter继承所属节点日期。无法解析的OSM日期跳过，全部缺失则留空。
+Generator及GEM Storage读取`Start year`、`Retired year`；DOE读取`Commissioned Date`、
+`Decommissioned Date`（原始日期按月-日-年解析）。不根据当前状态伪造日期，日期缺失仍留空。
+
+`case.toml`的`[snapshot].at`指定Network、Generator、Storage设备断面，空值使用`[time].start`；
+`[parameters].at`为空时跟随设备断面，可单独指定参数适用时间。
+日期按精度覆盖整个年/月/日，判断区间是否相交：`valid_to="2024"`允许`at="2024-12-31"`，
+`at="2030"`也允许2030年中投运的设备。设备有任一有效期边界时优先使用日期，两端均空才回退
+到case的允许状态列表；状态也空时默认允许。缺失退役日期意味着没有退出限制，即使来源状态是Retired，
+因此应补齐日期。Planned且无日期默认不会纳入；有预计投运日期的设备在对应未来断面可以纳入。
+这是一套固定资产断面，不会在同一次UC中逐小时投退役。
+
+Mapping保留全部网络记录，case按日期和电压筛选后再求最大连通子图。Spatial和Population如需
+按有效期选择，分别设置`mapping.toml`的`[spatial].at`、`[population].at`，在生成cells及负荷
+空间权重之前生效；两者可独立设置，空值不筛选，也不继承case日期。Mapping的`[general].timezone`
+和`time_step`统一Load/Resource各来源的时间轴；case的`[time]`再确定模拟窗口、时区和步长。
+负荷人口权重已在mapping生成，case不会依据设备断面重新选择人口。Load/Resource按case的
+`start/end`选择小时序列，不能用单个设备断面日期
+代替整个模拟时段。切换日期或来源后必须显式`build(overwrite=True)`，建议使用独立输出目录。
+
+新增网络设备不要编辑`data/osm/china-power-network.*`，这些是PBF可重建的派生文件。
+可独立维护例如`data/network/planned.geojson`，在原始数据目录登记manual/geojson来源，再将其source_id
+追加到`[datasets.network].source_ids`（第一个仍是OSM PBF）。补充文件每条记录用`class`区分
+`bus/branch/transformer/converter`，并提供唯一`uid`、geometry、电压类型、端点UID等对应标准字段；
+可直接填写有效期或使用上述日期标签。Branch端点必须连接同电压、同AC/DC类型的Bus。
+设备参数仍在parameter来源中通过`applies_to_uid`提供。补充文件不会被OSM重建覆盖；
+重复UID会报错，此接口用于新增，不会静默覆盖既有设备。
+
+新增Generator/Storage可在工作副本GEM表增加行，或登记独立的GEM列名XLSX/CSV来源并追加source_ids；
+GEM unit/phase ID需唯一。Storage的JSON来源继续按DOE格式读取。保留下载原件，优先使用独立补充表。
 
 固定dataset ID为`spatial`、`network`、`generator`、`storage`、`parameter`、
 `load`、`population`和`resource`。实体数据使用GeoParquet，连续时空数据使用
@@ -302,6 +356,13 @@ mapping.schema(["network", "generator"])
 `mapped_data`是包含全部八类dataset及mapping配置快照的`MappedData`。其中`parameter`从
 standard层原样继承并写入`outputs/mapping/parameter.parquet`，因此case层只需要一个
 完整的mapped-data入口。
+
+读取时遵循NetCDF原有存储分块，时序空间映射前再调整为最多100个时间点，随后扩展到完整空间维度。
+新写出的时序文件时间存储块也不超过100步，避免强拆旧存储块导致重复解压。GridX时序I/O统一
+使用`src/common/io.py`统一指定的h5netcdf后端，绕过netCDF4字符串文件重复打开、回收时的原生段错误
+（上游Unidata/netcdf4-python #1444）；文件仍为兼容的NetCDF4/HDF5，无需转换已有数据。
+NetCDF写入保留同步调度，避免过大的并发内存占用。数据年份增长不应扩大
+单个时间块。仅更新气象时可用`mapping.build("resource", overwrite=True)`，无需全量重建。
 
 `build()`完成以下工作：
 

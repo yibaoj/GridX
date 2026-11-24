@@ -279,9 +279,24 @@ def test_solver_time_accumulates_native_runtime_without_model_io() -> None:
     _record_solver_time(network)
     _record_solver_time(network)
     assert network.meta['solver_time_s'] == 2.5
+    network.model.solver_model = SimpleNamespace(SolvingTime=0.5)
+    _record_solver_time(network)
+    assert network.meta['solver_time_s'] == 3.0
     network.model.solver_model = None
     _record_solver_time(network)
     assert network.meta['solver_time_s'] is None
+
+
+def test_solver_options_use_backend_parameter_names() -> None:
+    from src.app.uc.manager import _solver_options
+
+    solver = dict(name="copt", method="ipm", time_limit_s=10,
+                  mip_gap=0.01, log_to_console=False)
+    assert _solver_options(solver) == dict(
+        TimeLimit=10.0, RelGap=0.01, LpMethod=2, LogToConsole=0)
+    solver["name"] = "highs"
+    assert _solver_options(solver) == dict(
+        time_limit=10.0, mip_rel_gap=0.01, solver="ipm", log_to_console=False)
 
 
 def test_uc_rejects_incomplete_case_and_unqualified_solver_output() -> None:

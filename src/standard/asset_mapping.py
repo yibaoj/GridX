@@ -91,7 +91,12 @@ class _GemMixin:
         return selected.sort_values(["priority", "rule_id"])
 
     def _gem_records(self, source_id: str, sheet: str) -> pd.DataFrame:
-        frame = pd.read_excel(self.source(source_id), sheet_name=sheet, engine="openpyxl")
+        path = self.source(source_id)
+        frame = (
+            pd.read_csv(path)
+            if path.suffix.lower() == ".csv"
+            else pd.read_excel(path, sheet_name=sheet, engine="openpyxl")
+        )
         required = {
             "Type",
             "Country/area",

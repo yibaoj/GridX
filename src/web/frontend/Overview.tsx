@@ -11,7 +11,7 @@ import {Loading,ErrorState} from './ui';
 import TermHelp from './TermHelp';
 import type {GlossaryTerm} from './glossary';
 import {energyStyle} from './mapStyle';
-const metricHelp:Record<string,GlossaryTerm>={'装机容量':'regionalCapacity','新能源装机':'newEnergyCapacity','年用电量':'energyTWh','最大负荷':'annualPeak','特高压支路数':'uhvBranches'};
+const metricHelp:Record<string,GlossaryTerm>={'装机容量':'regionalCapacity','新能源装机':'newEnergyCapacity','年用电量':'energyTWh','最大负荷':'annualPeak','特高压线路段数':'uhvBranches'};
 const miniSettings={...defaultSettings,layer:'load' as const,basemap:false};
 export default function Overview({config,data,province,onProvince,onMap,onSimulation}:{config:Bootstrap;data:OverviewData;province?:Province;onProvince:(p?:Province)=>void;onMap:(p?:Province,layer?:LayerId)=>void;onSimulation:()=>void}){
   const[query,setQuery]=useState('');const[ascending,setAscending]=useState(false);const{data:mapData,error,retry}=useLayer(miniSettings);const regional=useResource<RegionalOverview>('/api/regional-overview');
@@ -22,10 +22,10 @@ export default function Overview({config,data,province,onProvince,onMap,onSimula
   const peerOption={grid:{left:95,right:65,top:14,bottom:26},tooltip:{trigger:'axis',confine:true,valueFormatter:(v:any)=>`${format(v,1)} TWh`},xAxis:{type:'value',name:'TWh',axisLabel:{fontSize:11},splitLine:{lineStyle:{color:'#edf0ee',type:'dashed'}}},yAxis:{type:'category',inverse:true,data:peers.map(p=>p.name),axisTick:{show:false},axisLine:{show:false},axisLabel:{fontSize:12}},series:[{type:'bar',barMaxWidth:21,label:{show:true,position:'right',formatter:(p:any)=>format(p.value,1),color:'#40564a',fontSize:12},data:peers.map(p=>({value:p.value,itemStyle:{color:p.id===province?.id?'#24785e':'#b5cdbf',borderRadius:[0,3,3,0]}}))}]};
   const categories=data.capacity_mix;const chartOption=useMemo(()=>({grid:{left:62,right:55,top:12,bottom:22},tooltip:{trigger:'axis',confine:true,valueFormatter:(v:any)=>`${format(v,1)} GW`},xAxis:{type:'value',name:'GW',axisLabel:{fontSize:11},splitLine:{lineStyle:{color:'#edf0ee',type:'dashed'}}},yAxis:{type:'category',data:categories.map(c=>labels[c.id]||c.label).reverse(),axisLine:{show:false},axisTick:{show:false},axisLabel:{fontSize:12}},series:[{type:'bar',data:categories.map(c=>({value:(c.value||0)/1000,itemStyle:{color:energyStyle(c.id,c.color).stroke,borderRadius:[0,3,3,0]}})).reverse(),barMaxWidth:16}]}),[categories]);
   const indicators=province?regional.data?.provinces[province.id]:regional.data?.national;
-  const metrics=[{name:'装机容量',value:indicators?indicators.installed_capacity_mw/1000:undefined,unit:'GW',icon:Zap},{name:'新能源装机',value:indicators?indicators.new_energy_capacity_mw/1000:undefined,unit:'GW',icon:Sun},{name:'年用电量',value:province?.value??data.annual_energy_twh,unit:'TWh',icon:Zap},{name:'最大负荷',value:indicators?.peak_load_mw!=null?indicators.peak_load_mw/1000:undefined,unit:'GW',icon:Gauge,missing:true},{name:'特高压支路数',value:indicators?.uhv_branch_count,unit:'条',icon:GitBranch}];
+  const metrics=[{name:'装机容量',value:indicators?indicators.installed_capacity_mw/1000:undefined,unit:'GW',icon:Zap},{name:'新能源装机',value:indicators?indicators.new_energy_capacity_mw/1000:undefined,unit:'GW',icon:Sun},{name:'年用电量',value:province?.value??data.annual_energy_twh,unit:'TWh',icon:Zap},{name:'最大负荷',value:indicators?.peak_load_mw!=null?indicators.peak_load_mw/1000:undefined,unit:'GW',icon:Gauge,missing:true,detail:indicators?.peak_timestamp?.replace('T',' ').slice(0,16)},{name:'特高压线路段数',value:indicators?.uhv_source_count??undefined,unit:'条',icon:GitBranch,missing:true}];
   return <div className="overview">
     {regional.error&&<ErrorState message={regional.error} retry={regional.retry}/>}
-    <section className="metric-strip regional-metrics" aria-label={`${province?.name||'全国'}关键指标`}>{metrics.map(m=><div className="metric" key={m.name}><span className="metric-label"><m.icon size={16}/>{m.name}<TermHelp term={metricHelp[m.name]}/></span>{m.missing&&m.value==null?<strong className="metric-missing">暂无数据</strong>:<strong>{format(m.value,m.unit==='条'?0:1)}<small>{m.unit}</small></strong>}</div>)}</section>
+    <section className="metric-strip regional-metrics" aria-label={`${province?.name||'全国'}关键指标`}>{metrics.map(m=><div className="metric" key={m.name}><span className="metric-label"><m.icon size={16}/>{m.name}<TermHelp term={metricHelp[m.name]}/></span>{m.missing&&m.value==null?<strong className="metric-missing">暂无数据</strong>:<strong>{format(m.value,m.unit==='条'?0:1)}<small>{m.unit}</small></strong>}{m.detail&&<div className="metric-sub">{m.detail}</div>}</div>)}</section>
     <div className="overview-grid">
       <section className="panel province-panel">
         <div className="panel-heading">
@@ -47,7 +47,6 @@ export default function Overview({config,data,province,onProvince,onMap,onSimula
           </table>
           {!rows.length&&<p className="empty-copy">没有匹配省份，请调整关键词。</p>}
         </div>
-        <div className="table-footer"><span>全国省级数据合计</span><strong>{format(data.annual_energy_twh,1)} <small>TWh</small></strong></div>
       </section>
       <section className="panel preview-map-panel">
         <div className="panel-heading"><div><h2>{province?`${province.name}用电量分布`:'用电量空间分布'}</h2><span>点击区域，查看该地区数据总览</span></div><button className="text-button" onClick={()=>onMap(province,'load')}>打开地图<ArrowUpRight size={15}/></button></div>

@@ -22,6 +22,7 @@ from .network import filter_network
 from .parameter import resolve_parameters
 from .remap import remap_assets, remap_load
 from .time import select_time
+from ..standard.time import lifecycle_mask
 
 
 class PowerSystemCaseManager:
@@ -37,6 +38,8 @@ class PowerSystemCaseManager:
             path = Path(__file__).resolve().parents[2] / path
         with path.resolve().open("rb") as file:
             self.config = tomllib.load(file)
+        if "at" in self.config.get("time", {}):
+            raise ValueError("Move case [time].at to [snapshot].at.")
         self.output_root = path.resolve().parents[1] / self.config["general"]["output_root"]
         if isinstance(mapped_data, SpatiotemporalMappingManager):
             self.mapping_manager = mapped_data
@@ -165,6 +168,7 @@ class PowerSystemCaseManager:
         """Construct and persist one internally consistent case bundle."""
 
         options = self.config
+        case_at = options.get("snapshot", {}).get("at") or options["time"].get("start")
         mapped_data = (
             self.mapped_data
             if self.mapped_data is not None
@@ -172,7 +176,7 @@ class PowerSystemCaseManager:
         )
         mapped_data, boundary = select_region(mapped_data, options.get("spatial", {}))
         network_data, branch_mapping = filter_network(
-            mapped_data.network, options["network"], largest=boundary is None
+            mapped_data.network, options["network"], largest=boundary is None, at=case_at
         )
         interface = empty_interface(network_data.bus.crs)
         region_report = []
@@ -205,7 +209,7 @@ class PowerSystemCaseManager:
             if mode == "interface":
                 crossing = crossing.loc[crossing.from_bus_uid.isin(retained) | crossing.to_bus_uid.isin(retained)]
                 resolved = resolve_parameters(crossing, mapped_data.parameter, dataset_id="network",
-                    component="branch", at=options["parameters"].get("at"))
+                    component="branch", at=options["parameters"].get("at") or case_at)
                 capacity = interface_capacities(crossing, resolved)
                 interface = build_interface(crossing, retained, capacity, options["spatial"].get("interface", {}))
         cells = mapped_data.spatial
@@ -222,6 +226,7 @@ class PowerSystemCaseManager:
             _filter_assets(
                 mapped_data.generator, options["generator"],
                 "capacity_mw",
+                at=case_at,
             ),
             dataset_id="generator",
             options=options["generator"],
@@ -231,6 +236,7 @@ class PowerSystemCaseManager:
             _filter_assets(
                 mapped_data.storage, options["storage"],
                 "power_capacity_mw",
+                at=case_at,
             ),
             dataset_id="storage",
             options=options["storage"],
@@ -243,7 +249,7 @@ class PowerSystemCaseManager:
         )
         resource = select_time(mapped_data.resource, options["time"])
         load_cells = load
-        at = options["parameters"].get("at")
+        at = options["parameters"].get("at") or case_at
         parameters = {
             component: resolve_parameters(
                 getattr(network_data, component), mapped_data.parameter,
@@ -327,12 +333,12 @@ def _filter_assets(
     data: gpd.GeoDataFrame,
     options: dict,
     capacity_column: str,
+    *,
+    at=None,
 ) -> gpd.GeoDataFrame:
-    status = data["status"].astype("string").str.lower()
-    allowed = {str(value).lower() for value in options["statuses"]}
     capacity = pd.to_numeric(data[capacity_column], errors="coerce")
     return data.loc[
-        status.isin(allowed)
+        lifecycle_mask(data, at, options["statuses"])
         & capacity.between(
             float(options["minimum_capacity_mw"]),
             float(options["maximum_capacity_mw"]),

@@ -41,14 +41,20 @@ aggregate_by = "bus"
 sum_parameter_names = []
 boolean_parameter_names = ["committable", "cyclic_state_of_charge"]
 
+[snapshot]
+# Network/generator/storage snapshot; empty uses time.start.
+at = ""
+
 [time]
-start = "2024-05-01 00:00"
-end = "2024-09-30 23:00"
+# Load/resource simulation window and case resolution (after mapping alignment).
+start = "2025-01-01 00:00"
+end = "2025-12-31 23:00"
 time_step = "1h"
 timezone = "Asia/Shanghai"
 
 [parameters]
-at = "2025"
+# Empty follows the asset snapshot; set explicitly to use another parameter vintage.
+at = ""
 
 [backend.pypsa]
 parameter_manifest = "config/pypsa_parameter_manifest.toml"

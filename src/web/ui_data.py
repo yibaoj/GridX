@@ -174,11 +174,20 @@ def regional_summary(overview: dict, payloads: dict) -> dict:
               for rings in polygons(feature.get("geometry"))]
               for feature in load["geojson"]["features"]}
     empty = dict(installed_capacity_mw=0.0, new_energy_capacity_mw=0.0,
-                 annual_energy_twh=0.0, peak_load_mw=None, uhv_branch_count=0)
+                 annual_energy_twh=0.0, peak_load_mw=None, peak_timestamp=None,
+                 uhv_branch_count=0, uhv_source_count=0, uhv_unidentified_branch_count=0)
     regions = {p["id"]: {**empty, "id": p["id"], "name": p["name"],
                "annual_energy_twh": p["value"], "generator_locations": 0}
                for p in overview["provinces"]}
     national = {**empty, "annual_energy_twh": overview["annual_energy_twh"]}
+    annual_peak = load["summary"].get("annual_peak", {})
+    if annual_peak.get("complete_year"):
+        national.update({key: annual_peak.get(key) for key in ("peak_load_mw", "peak_timestamp")})
+        for feature in unique_features(load["geojson"]["features"]):
+            key = feature_id(feature)
+            if key in regions:
+                regions[key].update({name: feature["properties"].get(name)
+                                     for name in ("peak_load_mw", "peak_timestamp")})
     coverage = dict(unassigned_locations=0, ambiguous_locations=0, unassigned_capacity_mw=0.0)
     features = unique_features(generator["geojson"]["features"])
     for feature in features:
@@ -203,7 +212,8 @@ def regional_summary(overview: dict, payloads: dict) -> dict:
             coverage["unassigned_capacity_mw"] += capacity
             coverage["ambiguous_locations"] += int(len(owners) > 1)
     branches = {key: set() for key in regions}
-    national_branches = set()
+    source_branches = {key: set() for key in regions}
+    unidentified = {key: set() for key in regions}
     for feature in network["geojson"]["features"]:
         props = feature["properties"]
         voltage = abs(float(props.get("voltage_kv") or 0))
@@ -217,24 +227,36 @@ def regional_summary(overview: dict, payloads: dict) -> dict:
         identifier = feature_id(feature)
         if not identifier or not lines:
             continue
-        national_branches.add(identifier)
+        source = (str(props["source_id"]), str(props["source_uid"])) if (
+            props.get("source_id") and props.get("source_uid")) else None
         for line in lines:
             box = bounds(line)
             for key in regions:
                 if identifier not in branches[key] and any(overlap(box, region_box) and line_intersects(line, rings)
                         for rings, region_box in shapes.get(key, [])):
                     branches[key].add(identifier)
+                    if source:
+                        source_branches[key].add(source)
+                    else:
+                        unidentified[key].add(identifier)
+    national_branches = set().union(*branches.values())
+    national_sources = set().union(*source_branches.values())
+    national_unidentified = set().union(*unidentified.values())
     national["uhv_branch_count"] = len(national_branches)
+    national["uhv_source_count"] = len(national_sources) if not national_unidentified else None
+    national["uhv_unidentified_branch_count"] = len(national_unidentified)
     for key, region in regions.items():
         region["uhv_branch_count"] = len(branches[key])
+        region["uhv_source_count"] = len(source_branches[key]) if not unidentified[key] else None
+        region["uhv_unidentified_branch_count"] = len(unidentified[key])
     demand = [sum(series["values"][index] for series in application["series"] if series["kind"] == "load")
               for index in range(len(application["time"]))]
     peak = max(demand) if demand else None
     return dict(schema_version=SCHEMA_VERSION, year=overview["year"], national=national, provinces=regions,
                 coverage=coverage, definitions=dict(
                     capacity="Geolocated standard-layer capacity, assigned by exported province polygons.",
-                    annual_peak="Unavailable in the exported package; never replaced by a simulation peak.",
-                    uhv="Unique AC branches >= 1000 kV or DC branches >= 800 kV, intersecting each province."),
+                    annual_peak="Maximum simultaneous standard-layer hourly demand over a complete calendar year; not an official measured peak. Timezone: " + annual_peak.get("timezone", "Asia/Shanghai"),
+                    uhv="AC >= 1000 kV or DC >= 800 kV; uhv_source_count deduplicates (source_id, source_uid), while uhv_branch_count retains electrical segments. Neither counts complete transmission projects; provincial counts may overlap and follow the network source snapshot."),
                 simulation=dict(installed_capacity_mw=payloads.get("layers/case/generator.json.gz", {}).get("summary", {}).get("value"),
                     maximum_load_mw=peak, peak_timestamp=application["time"][demand.index(peak)] if demand else None,
                     start=application["time"][0] if demand else None, end=application["time"][-1] if demand else None,

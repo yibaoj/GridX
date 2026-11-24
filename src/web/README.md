@@ -90,6 +90,27 @@ HTTP 服务和页面依赖导出数据契约。`ui_data.py` 使用 Python 标准
 UC 每条 series 包含 id、kind、values，values 与 time 等长，功率单位 MW，储能充电系列为负值。
 浏览器展示已有调度结果，UC 运行由应用层负责。
 
+### 最大负荷与特高压统计
+
+`build.py` 从标准层 `outputs/standard/load.nc` 读取 `plot_year` 对应的完整年度小时负荷。
+逐省取时间最大值和首次出现时间；全国先逐小时汇总各省，再取最大值，不能把各省峰值直接相加。
+结果保存在 `outputs/web/data/layers/standard/load.json.gz`：省级要素的
+`peak_load_mw`、`peak_timestamp`，以及 summary 中的全国 `annual_peak`。
+峰值使用 MW，时间沿用标准层时区（当前为北京时间）。缺小时或缺值的年份不输出年度峰值。
+这些指标来自模型负荷曲线，包含合成数据，不替代官方调度峰荷；模拟时段峰值仍单独保存。
+
+`ui_data.py` 仅使用上述导出包，将指标写入
+`outputs/web/cache/<revision>/regional-overview.json.gz`，通过 `/api/regional-overview` 提供给首页。
+更新源数据后重新运行 `python -m src.web.build`，再重启服务即可更新缓存。
+
+首页“特高压线路段数”筛选交流 ≥1000 kV、直流 ≥800 kV，并按
+`(source_id, source_uid)` 去重，同一 OSM way 切出的多个电气支路只计一次。
+来源标识由 `build.py` 保存在网络 GeoJSON 中。全国仅统计与导出省界相交的来源，省级统计允许跨省重复。
+API 的 `uhv_source_count` 为线路段数，原 `uhv_branch_count` 保留电气支路计数；
+旧包缺少来源标识时不冒用支路数替代线路段数。
+一个工程可能包含多个 OSM way，因此该指标仍不是工程数；要统计工程，需要另建经核实的工程目录与来源关联。
+网络指标使用来源快照，不代表 `plot_year` 对应年份的官方在运数量。
+
 后端重构需运行契约测试并检查导出的字段与单位。校验负责发现不兼容，适配器负责维持兼容。
 旧版数据可继续读取。缓存损坏可重建，导出文件缺失或不兼容时页面给出提示。
 

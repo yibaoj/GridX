@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -30,7 +31,18 @@ class SourceDownloader:
     def download(self, source: pd.Series, path: Path) -> None:
         method = source["acquisition_method"]
         if method == "direct":
-            self._download_url(source["download_url"], path)
+            if source["file_format"] == "pbf" and re.fullmatch(
+                r"\d{4}-\d{2}-\d{2}", str(source.get("version", ""))
+            ):
+                pending = path.with_name(f"{path.name}.download")
+                try:
+                    self._download_url(source["download_url"], pending)
+                    self.validate(source, pending)
+                    pending.replace(path)
+                finally:
+                    pending.unlink(missing_ok=True)
+            else:
+                self._download_url(source["download_url"], path)
         elif method == "figshare_api":
             self._download_url(self._figshare_url(source), path)
         elif method == "atlite_cds":
@@ -62,6 +74,20 @@ class SourceDownloader:
 
         if not path.is_file() or path.stat().st_size == 0:
             raise ValueError(f"Raw source file is empty or missing: {path}")
+        if source["file_format"] == "pbf" and re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}", str(source.get("version", ""))
+        ):
+            observed_at = subprocess.check_output(
+                ["osmium", "fileinfo", "-g",
+                 "header.option.osmosis_replication_timestamp", str(path)],
+                text=True,
+            ).strip()
+            if observed_at.split("T", 1)[0] != source["version"]:
+                raise ValueError(
+                    f"PBF snapshot {observed_at!r} does not match configured "
+                    f"version {source['version']!r}; register the new "
+                    "snapshot with its own date in version and local_path."
+                )
         if str(source["file_format"]).lower() == "zip":
             try:
                 with ZipFile(path) as archive:

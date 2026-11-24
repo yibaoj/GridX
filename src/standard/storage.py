@@ -11,21 +11,37 @@ from shapely.geometry import Point
 
 from .asset_mapping import _asset_in_scope, _GemMixin
 from .base import _Standardizer
+from .time import valid_time
 from .schema import (
     _finalize_frame,
     _numeric,
-    _partial_time,
     _points,
     _snake_case,
     _write_geodataframe,
 )
 
 
+def _doe_time(value):
+    """DOE exports US-format dates; accept ISO dates in supplemental exports."""
+
+    if value is None or pd.isna(value) or not str(value).strip():
+        return pd.NA
+    for format_string in ("%m-%d-%Y", "%Y-%m-%d", "%Y"):
+        parsed = pd.to_datetime(str(value).strip(), format=format_string, errors="coerce")
+        if pd.notna(parsed):
+            return str(value).strip() if format_string == "%Y" else parsed.date().isoformat()
+    return pd.NA
+
+
 class _StorageStandardizer(_Standardizer, _GemMixin):
     def build(self) -> gpd.GeoDataFrame:
-        gem_source, doe_source = self.config["source_ids"]
-        rows = self._gem_storage(gem_source)
-        rows.extend(self._doe_storage(doe_source))
+        rows = []
+        for source_id in self.config["source_ids"]:
+            rows.extend(
+                self._doe_storage(source_id)
+                if self.source(source_id).suffix.lower() == ".json"
+                else self._gem_storage(source_id)
+            )
         result = _finalize_frame(
             pd.DataFrame(rows),
             schema_id="storage",
@@ -79,8 +95,8 @@ class _StorageStandardizer(_Standardizer, _GemMixin):
                     else pd.NA
                 ),
                 "observed_at": self.source_observed_at(source_id),
-                "valid_from": _partial_time(row.get("Start year")),
-                "valid_to": _partial_time(row.get("Retired year")),
+                "valid_from": valid_time(row.get("Start year")),
+                "valid_to": valid_time(row.get("Retired year")),
                 "source_id": source_id,
                 "source_uid": row["GEM unit/phase ID"],
                 "mapping_rule_id": classification.loc[index, "mapping_rule_id"],
@@ -157,8 +173,8 @@ class _StorageStandardizer(_Standardizer, _GemMixin):
                 "geometry": geometry,
                 "geometry_method": "source_coordinates" if geometry else pd.NA,
                 "observed_at": self.source_observed_at(source_id),
-                "valid_from": pd.NA,
-                "valid_to": pd.NA,
+                "valid_from": _doe_time(project.get("Commissioned Date")),
+                "valid_to": _doe_time(project.get("Decommissioned Date")),
                 "source_id": source_id,
                 "source_uid": str(project.get("ID")),
                 "mapping_rule_id": rule["rule_id"] if rule is not None else pd.NA,

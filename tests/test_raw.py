@@ -1,8 +1,10 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from src.raw import RawDataManager
+from src.raw.download import SourceDownloader
 
 
 def _catalog(path: Path, *, local_path: str, remote_name: str) -> Path:
@@ -63,3 +65,26 @@ def test_prepare_normalizes_only_the_exact_remote_filename(tmp_path: Path) -> No
     assert bool(report.loc["source", "available"])
     assert (data / "nested/canonical.csv").is_file()
     assert not candidate.exists()
+
+
+def test_download_rejects_new_pbf_snapshot_without_replacing_old_file(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    path = tmp_path / "china-2026-07-16.osm.pbf"
+    path.write_bytes(b"original snapshot")
+    source = pd.Series({
+        "acquisition_method": "direct", "file_format": "pbf",
+        "download_url": "https://example.com/china-latest.osm.pbf",
+        "version": "2026-07-16",
+    })
+    monkeypatch.setattr(SourceDownloader, "_download_url", staticmethod(
+        lambda url, target: target.write_bytes(b"new snapshot")
+    ))
+    monkeypatch.setattr("src.raw.download.subprocess.check_output",
+                        lambda *args, **kwargs: "2026-08-01T20:21:30Z\n")
+
+    with pytest.raises(ValueError, match="does not match"):
+        SourceDownloader().download(source, path)
+
+    assert path.read_bytes() == b"original snapshot"
+    assert not path.with_name(f"{path.name}.download").exists()

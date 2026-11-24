@@ -9,6 +9,7 @@ output = "spatial.parquet"
 
 [datasets.network]
 processor = "network"
+# First source is OSM PBF; additional sources are independent electrical GeoJSON.
 source_ids = ["osm_china_pbf"]
 output = "network"
 
@@ -33,6 +34,7 @@ include_statuses = []
 
 [datasets.generator]
 processor = "generator"
+# Additional XLSX/CSV sources use the same GEM columns and unique unit/phase IDs.
 source_ids = ["gem_integrated_power"]
 output = "generator.parquet"
 
@@ -44,6 +46,7 @@ class_mapping_file = "config/class_mapping.csv"
 
 [datasets.storage]
 processor = "storage"
+# JSON uses the DOE adapter; additional GEM-column XLSX/CSV files are supported.
 source_ids = ["gem_integrated_power", "doe_storage"]
 output = "storage.parquet"
 
@@ -118,11 +121,12 @@ parameters = { r_ohm_per_km = "ohm/km", x_ohm_per_km = "ohm/km", c_nf_per_km = "
 
 [datasets.load]
 processor = "load"
-source_ids = ["provincial_hourly_load"]
+# 2025-2026 are synthetic extensions of the 2024 hourly profile, not observations.
+source_ids = ["provincial_hourly_load", "provincial_hourly_load_synthetic_2025_2026"]
 output = "load.nc"
 
 [datasets.load.options]
-years = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024]
+years = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
 timezone = "Asia/Shanghai"
 interval = "1h"
 
@@ -138,7 +142,7 @@ valid_from = "2020"
 
 [datasets.resource]
 processor = "resource"
-source_ids = ["era5_china_2024"]
+source_ids = ["era5_china_2024", "era5_china_2025"]
 output = "resource.nc"
 
 [datasets.resource.options]

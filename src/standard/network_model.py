@@ -12,9 +12,9 @@ from .schema import (
     REQUIRED_COLUMNS,
     _finalize_frame,
     _numeric,
-    _partial_time,
 )
 from .model import StandardNetwork
+from .time import network_validity
 
 
 def tag_numbers(value: object) -> list[float]:
@@ -348,12 +348,8 @@ def _facility_node_row(
         "geometry": feature.geometry,
         "geometry_method": "source_geometry",
         "observed_at": observed_at,
-        "valid_from": _partial_time(
-            feature.start_date if hasattr(feature, "start_date") else pd.NA
-        ),
-        "valid_to": _partial_time(
-            feature.closing_date if hasattr(feature, "closing_date") else pd.NA
-        ),
+        "valid_from": network_validity(feature)[0],
+        "valid_to": network_validity(feature)[1],
         "source_id": source_id,
         "source_uid": feature.source_uid.removeprefix("osm:"),
         "name": feature.name,

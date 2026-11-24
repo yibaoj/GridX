@@ -243,17 +243,43 @@ class WebDataBuilder:
         frame, metadata = prepared[selected]
         frame = frame.assign(location_uid=data["uid"].values.astype(str)).to_crs(4326)
         values = pd.to_numeric(frame["_value"], errors="coerce")
+        metadata_peak = {}
+        if stage == "standard" and dataset_id == "load":
+            annual = data[variable].sel({"time": str(self.year), "class": selected})
+            times = pd.DatetimeIndex(annual.time.values)
+            complete = times.equals(pd.date_range(
+                f"{self.year}-01-01", f"{self.year + 1}-01-01",
+                freq=data.attrs["time_step"], inclusive="left",
+            )) and bool(annual.notnull().all().compute())
+            peaks = annual.max("time").compute() if complete else None
+            indices = annual.argmax("time").compute() if complete else None
+            frame["peak_load_mw"] = peaks.values if complete else None
+            frame["peak_timestamp"] = [
+                pd.Timestamp(times[int(index)]).isoformat()
+                for index in indices.values
+            ] if complete else None
+            national = annual.astype("float64").sum("uid", skipna=False).compute()
+            metadata_peak["annual_peak"] = {
+                "peak_load_mw": float(national.max()) if complete else None,
+                "peak_timestamp": pd.Timestamp(times[int(national.argmax("time"))]).isoformat() if complete else None,
+                "complete_year": complete,
+                "timezone": data.attrs["timezone"],
+                "basis": "standard_hourly_load",
+                "source_ids": sorted(set(data.load_source_id.sel(time=str(self.year)).values.tolist()))
+                if "load_source_id" in data.coords else data.attrs["source_id"].split(";"),
+            }
         if isinstance(data, xr.Dataset) and stage != "case":
             data.close()
         return _response(
             _geojson(
-                frame, ("location_uid", "_value"),
+                frame, ("location_uid", "_value", "peak_load_mw", "peak_timestamp"),
                 property_names={"_value": "value"},
             ),
             count=int(values.notna().sum()), value=float(values.mean()),
             selected_class=selected, title=metadata["title"],
             unit=metadata["unit"], year=self.year,
             vmin=metadata["vmin"], vmax=metadata["vmax"],
+            **metadata_peak,
         )
 
     def _network(self, stage: str) -> dict[str, Any]:
@@ -272,7 +298,8 @@ class WebDataBuilder:
         )
         buses = buses.to_crs(4326).assign(feature_kind="bus")
         features = _geojson(branches, (
-            "uid", "feature_kind", "_style", "_voltage_kv", "_current_type"
+            "uid", "feature_kind", "_style", "_voltage_kv", "_current_type",
+            "source_id", "source_uid",
         ), property_names={
             "_style": "style", "_voltage_kv": "voltage_kv",
             "_current_type": "current_type",

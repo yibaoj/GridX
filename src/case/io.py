@@ -7,6 +7,7 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 import xarray as xr
+from ..common.io import NETCDF_ENGINE
 
 from .model import CaseComponent, CaseNetwork, PowerSystemCase
 
@@ -41,7 +42,7 @@ def load_case(root: Path, config: dict) -> PowerSystemCase:
         network=_read_network(root / "network"),
         generator=_read_component(root / "generator"),
         storage=_read_component(root / "storage"),
-        load=xr.open_dataset(root / "load.nc", chunks="auto"),
+        load=xr.open_dataset(root / "load.nc", engine=NETCDF_ENGINE, chunks="auto"),
         spatial=spatial,
         resource=_read_spatial_timeseries(root / "resource.nc", spatial),
         population=gpd.read_parquet(root / "population.parquet"),
@@ -64,7 +65,7 @@ def load_case_dataset(root: Path, dataset_id: str, config: dict) -> object:
         if dataset_id == "resource":
             spatial = gpd.read_parquet(root / "spatial.parquet")
             return _read_spatial_timeseries(root / "resource.nc", spatial)
-        return xr.open_dataset(root / f"{dataset_id}.nc", chunks="auto")
+        return xr.open_dataset(root / f"{dataset_id}.nc", engine=NETCDF_ENGINE, chunks="auto")
     return gpd.read_parquet(root / f"{dataset_id}.parquet")
 
 
@@ -140,6 +141,7 @@ def _write_xarray(data: xr.Dataset, path: Path, variable: str) -> None:
     temporary = path.with_suffix(f"{path.suffix}.tmp")
     data.to_netcdf(
         temporary,
+        engine=NETCDF_ENGINE,
         encoding={variable: {"zlib": True, "complevel": 4}},
     )
     temporary.replace(path)
@@ -151,7 +153,7 @@ def _read_spatial_timeseries(
 ) -> xr.Dataset:
     """Open a cell time series without NetCDF fixed-width WKT expansion."""
 
-    data = xr.open_dataset(path, chunks="auto", drop_variables=["geometry"])
+    data = xr.open_dataset(path, engine=NETCDF_ENGINE, chunks="auto", drop_variables=["geometry"])
     lookup = spatial.set_index("spatial_uid").geometry.to_wkt()
     spatial_uids = data["spatial_uid"].values.astype(str)
     geometry = lookup.reindex(spatial_uids)

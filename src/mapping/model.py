@@ -13,7 +13,7 @@ from ..standard import ParameterData
 
 @dataclass(frozen=True)
 class MappedNetwork:
-    """Largest connected network and its spatial-cell relationships."""
+    """Unpruned network and its spatial-cell relationships."""
 
     bus: gpd.GeoDataFrame
     branch: gpd.GeoDataFrame

@@ -49,7 +49,14 @@ def check(address: str, config: str) -> dict:
             actual = hashlib.sha256((service.output_root / source["path"]).read_bytes()).hexdigest()
             assert actual == source["sha256"], source["path"]
     assert overview["annual_energy_twh"] == sum(province["value"] for province in overview["provinces"])
-    assert regional["national"]["peak_load_mw"] is None
+    load = request("/api/layers/standard/load")
+    annual_peak = load["summary"].get("annual_peak", {})
+    expected_peak = annual_peak.get("peak_load_mw") if annual_peak.get("complete_year") else None
+    assert regional["national"]["peak_load_mw"] == expected_peak
+    for feature in load["geojson"]["features"]:
+        props = feature["properties"]
+        if annual_peak.get("complete_year"):
+            assert regional["provinces"][props["location_uid"]]["peak_load_mw"] == props["peak_load_mw"]
     assert set(regional["provinces"]) == {province["id"] for province in overview["provinces"]}
     return {"routes_checked": len(routes) + 3, "year": manifest["year"],
             "provinces": len(overview["provinces"]), "sources": len(overview["sources"]),
