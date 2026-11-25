@@ -32,7 +32,6 @@ _DESCRIPTIONS = {
     "overlap_length_km": "Branch length contained in the standard cell.",
     "branch_length_share": "Share of total branch length contained in the cell.",
     "mapping_status": "Whether the branch intersects the spatial-cell domain.",
-    "in_largest_connected_graph": "Membership in the unfiltered largest graph; mapping retains other components too.",
 }
 
 _REQUIRED = {
@@ -65,11 +64,7 @@ _REQUIRED = {
     },
     ("network", "bus"): {
         "spatial_uid", "spatial_level", "admin_uid", "cell_distance_km",
-        "in_largest_connected_graph",
     },
-    ("network", "branch"): {"in_largest_connected_graph"},
-    ("network", "transformer"): {"in_largest_connected_graph"},
-    ("network", "converter"): {"in_largest_connected_graph"},
 }
 
 

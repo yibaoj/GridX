@@ -64,3 +64,8 @@ env/
 # Temporary logs and files
 *.log
 *.tmp
+
+# Curated storage source snapshots needed to reproduce standardization
+!data/storage/
+data/storage/*
+!data/storage/manual_storage.csv

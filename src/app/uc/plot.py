@@ -153,6 +153,11 @@ def prepare_dispatch_data(
     ).to_series().map(_storage_class)
     storage_discharge = storage_power.clip(lower=0).T.groupby(storage_class).sum().T
     storage_charge = storage_power.clip(upper=0).T.groupby(storage_class).sum().T
+    if "thermal_output_mw" in data:
+        thermal = data["thermal_output_mw"].where(
+            data.thermal_bus.isin(list(buses)), 0
+        ).sum("thermal_uid").to_pandas()
+        storage_discharge["thermal_storage"] = storage_discharge.get("thermal_storage", 0) + thermal
 
     load_bus = data["load_bus"].to_series()
     load_uid = load_bus.index[load_bus.isin(buses)]

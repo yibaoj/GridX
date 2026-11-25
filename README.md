@@ -163,7 +163,8 @@ from src.raw.era5 import convert_era5_grib
 convert_era5_grib("data/era5/era5_china_2025.grib", "data/era5/era5_china_2025.nc")
 ```
 
-转换需要完整的风、辐射、温度、径流13个原始字段，保留GRIB原件，分块写入NC；
+转换需要完整的风、辐射、温度、径流13个原始字段，分块写入NC。数据目录只注册处理完成的
+atlite NetCDF，复用或传输现有气象数据时只需该文件。GRIB 可作为离线转换输入另行归档；
 仅支持CDS逐小时单层产品的一小时累计量，不适用于ERA5-Land或未去累计的预报产品。
 普通GRIB转NC只改变容器，不能直接替代atlite需要的风速、辐射分量、太阳位置等处理。
 `[datasets.resource].source_ids`可列出多个同网格ERA5 Cutout，标准层按时间排序合并，
@@ -370,9 +371,8 @@ NetCDF写入保留同步调度，避免过大的并发内存占用。数据年�
 2. 按`level_priority`消除不同空间层重叠，并处理小面积碎片。
 3. population按面积汇总；load按面积或辅助数据守恒分配；resource按相交面积进行
    intensive加权；所有时序转换到配置时区和时间步。
-4. 根据branch、transformer和converter的`from_bus_uid/to_bus_uid`提取最大连通子图。
-5. 把bus、branch、generator和storage映射到cell。
-6. generator、storage和load按各自配置匹配电气bus。默认候选为
+4. 把bus、branch、generator和storage映射到cell。
+5. generator、storage和load按各自配置匹配电气bus。默认候选为
    `bus_subclasses=["station_bus"]`；同位置多bus按各自配置的
    `voltage_preference="high"`或`"low"`选择。
 
@@ -771,3 +771,13 @@ UC 中显式 SOC 设置覆盖 case 的 cyclic SOC 参数；滚动窗口之间继
 UC 的 `summary["solver_time_s"]` 记录 HiGHS 原生求解用时（秒），不包含模型构建、
 文件写出/读取和结果回填；滚动求解累加各窗口用时。未提供该计时接口的求解器返回空值。
 已有历史结果不会补算此字段，需重新运行才能记录。
+
+UC 的 `[storage.models]` 按储能 subclass 选模型。默认使用 `"storage_unit"`。设置 `sensible_heat = "sensible_heat"` 时，
+应用在基础 PyPSA Network 中以集热器、热母线、热罐和动力岛替换显热储能的通用组件。
+`[storage.thermal]` 的 `pv_proxy` 仅用于情景演示。效率、热损和集热倍数通过 Parameter 数据集匹配，演示默认值见 `data/parameter/model_assumptions.csv`。
+`thermal_energy_mwh_th`、`thermal_solar_mw_th`、`thermal_output_mw` 分别记录罐内热量、
+实际利用的太阳热功率和电侧发电。模型通过配置的初末 SOC 约束热罐。
+
+临时研究情景可在 Case 配置的 `[storage.valid_from_overrides]` 中按储能 UID
+写入假设生效日期，例如 `"manual_storage:anduo_tushuo_csp" = "2025-01-01"`。
+原始来源中的建设状态与官方时间仍存于手工数据表。

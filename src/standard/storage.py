@@ -37,11 +37,14 @@ class _StorageStandardizer(_Standardizer, _GemMixin):
     def build(self) -> gpd.GeoDataFrame:
         rows = []
         for source_id in self.config["source_ids"]:
-            rows.extend(
-                self._doe_storage(source_id)
-                if self.source(source_id).suffix.lower() == ".json"
-                else self._gem_storage(source_id)
-            )
+            metadata = self.manager.raw_data.catalog.loc[source_id]
+            reader = json.loads(metadata.get("options_json") or "{}").get("reader")
+            if reader == "curated_storage":
+                rows.extend(self._curated_storage(source_id))
+            elif self.source(source_id).suffix.lower() == ".json":
+                rows.extend(self._doe_storage(source_id))
+            else:
+                rows.extend(self._gem_storage(source_id))
         result = _finalize_frame(
             pd.DataFrame(rows),
             schema_id="storage",
@@ -58,6 +61,40 @@ class _StorageStandardizer(_Standardizer, _GemMixin):
             ).astype("Float64")
         _write_geodataframe(result, self.output())
         return result
+
+    def _curated_storage(self, source_id: str) -> list[dict[str, object]]:
+        frame = pd.read_csv(self.source(source_id), dtype={"source_uid": str})
+        rules = self._mapping_rules(
+            self.manager.project_root / self.options["class_mapping_file"],
+            "curated_storage",
+        )
+        if frame["source_uid"].isna().any() or frame["source_uid"].duplicated().any():
+            raise ValueError(f"{source_id} requires unique, nonempty source_uid values.")
+        rows = []
+        for row in frame.to_dict("records"):
+            status = _snake_case(row["status"])
+            allowed = self.options.get("include_statuses", [])
+            if allowed and status not in {_snake_case(value) for value in allowed}:
+                continue
+            matched = rules[rules["technology_pattern"].map(
+                lambda pattern: bool(re.search(pattern or ".*", row["technology"], re.I))
+            )]
+            if matched.empty or matched.iloc[0]["dataset"] != "storage":
+                raise ValueError(f"{source_id}: unclassified technology {row['technology']!r}.")
+            rule = matched.iloc[0]
+            rows.append({
+                **row,
+                "uid": f"{source_id}:{row['source_uid']}",
+                "class": rule["class"],
+                "subclass": rule["subclass"],
+                "status": status,
+                "geometry": _points([row["longitude"]], [row["latitude"]])[0],
+                "valid_from": valid_time(row["valid_from"]),
+                "valid_to": valid_time(row["valid_to"]),
+                "source_id": source_id,
+                "mapping_rule_id": rule["rule_id"],
+            })
+        return rows
 
     def _gem_storage(self, source_id: str) -> list[dict[str, object]]:
         frame = self._gem_records(source_id, self.options["sheet"])

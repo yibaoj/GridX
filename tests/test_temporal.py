@@ -96,6 +96,8 @@ def test_mapping_keeps_disconnected_versions_then_case_filters_dates():
     manager.standard_data = SimpleNamespace(load=lambda name: network)
     mapped = manager.build_network()
     assert len(mapped.bus) == 4
+    for table in (mapped.bus, mapped.branch, mapped.transformer, mapped.converter):
+        assert "in_largest_connected_graph" not in table.columns
     mapped = MappedNetwork(mapped.bus, mapped.branch, mapped.transformer, mapped.converter,
                            pd.DataFrame({"branch_uid": network.branch.uid}))
     options = dict(minimum_voltage_kv=0, maximum_voltage_kv=2000,

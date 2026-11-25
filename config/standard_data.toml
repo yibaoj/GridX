@@ -47,7 +47,7 @@ class_mapping_file = "config/class_mapping.csv"
 [datasets.storage]
 processor = "storage"
 # JSON uses the DOE adapter; additional GEM-column XLSX/CSV files are supported.
-source_ids = ["gem_integrated_power", "doe_storage"]
+source_ids = ["gem_integrated_power", "doe_storage", "manual_storage"]
 output = "storage.parquet"
 
 [datasets.storage.options]

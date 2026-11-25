@@ -232,9 +232,16 @@ class PowerSystemCaseManager:
             options=options["generator"],
             **common,
         )
+        storage_input = mapped_data.storage
+        overrides = options["storage"].get("valid_from_overrides", {})
+        if overrides:
+            storage_input = storage_input.copy()
+            for uid, valid_from in overrides.items():
+                mask = storage_input.uid.eq(uid)
+                storage_input.loc[mask, "valid_from"] = valid_from
         storage = remap_assets(
             _filter_assets(
-                mapped_data.storage, options["storage"],
+                storage_input, options["storage"],
                 "power_capacity_mw",
                 at=case_at,
             ),

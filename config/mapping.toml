@@ -6,12 +6,18 @@ timezone = "Asia/Shanghai"
 time_step = "1h"
 random_seed = 42
 
+[outputs]
+spatial = "spatial.parquet"
+network = "network"
+generator = "generator.parquet"
+storage = "storage.parquet"
+parameter = "parameter.parquet"
+load = "load.nc"
+population = "population.parquet"
+resource = "resource.nc"
+
 [spatial]
 # Boundary validity selection before cell construction; empty disables filtering.
-at = ""
-
-[population]
-# Population validity selection before load weighting; empty disables filtering.
 at = ""
 
 [cell]
@@ -30,6 +36,15 @@ exclude_admin_uids = [
 same_level_overlap_tolerance_km2 = 1.0
 minimum_area_km2 = 5.0
 
+[network]
+bus_subclasses = ["station_bus"]
+
+[asset_bus_mapping]
+generator_method = "geometry"
+storage_method = "geometry"
+prefer_same_admin = true
+voltage_preference = "high"
+
 [spatial_mapping.load]
 # Load is extensive. "linear" uses area weights; "auxiliary" always
 # normalizes the configured auxiliary values over every covered target cell.
@@ -44,33 +59,18 @@ uncovered_auxiliary_nearest_levels = ["marine_zone"]
 auxiliary_must_be_finer = true
 conservation_tolerance = 0.005
 
+[load_bus_mapping]
+method = "geometry"
+prefer_same_admin = true
+voltage_preference = "high"
+
+[population]
+# Population validity selection before load weighting; empty disables filtering.
+at = ""
+
 [spatial_mapping.resource]
 # Resource availability is intensive; "linear" applies overlap-area averaging
 # in either scale direction. Width and height describe point-based source cells.
 method = "linear"
 source_cell_width_degrees = 0.25
 source_cell_height_degrees = 0.25
-
-[network]
-bus_subclasses = ["station_bus"]
-
-[asset_bus_mapping]
-generator_method = "geometry"
-storage_method = "geometry"
-prefer_same_admin = true
-voltage_preference = "high"
-
-[load_bus_mapping]
-method = "geometry"
-prefer_same_admin = true
-voltage_preference = "high"
-
-[outputs]
-spatial = "spatial.parquet"
-population = "population.parquet"
-load = "load.nc"
-resource = "resource.nc"
-network = "network"
-generator = "generator.parquet"
-storage = "storage.parquet"
-parameter = "parameter.parquet"

@@ -47,6 +47,7 @@ doe_thermal_sensible,60,doe,,^Sensible heat$,,storage,thermal_storage,sensible_h
 doe_thermal_other,70,doe,,^Heat thermal storage$,,storage,thermal_storage,other_thermal
 doe_capacitor,80,doe,,^Electro-chemical capacitor$,,storage,capacitor_storage,electrochemical_capacitor
 doe_storage_fallback,90,doe,,.*,,storage,other_storage,
+curated_molten_salt_csp,10,curated_storage,,^Molten salt tower CSP$,,storage,thermal_storage,sensible_heat
 pypsa_coal,10,pypsa_technology_costs,,^coal$,,generator,coal,
 pypsa_lignite,20,pypsa_technology_costs,,^lignite$,,generator,coal,lignite
 pypsa_ccgt,30,pypsa_technology_costs,,^CCGT$,,generator,gas,combined_cycle

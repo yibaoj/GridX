@@ -26,7 +26,6 @@ from .model import MappedData, MappedNetwork
 from .network import (
     attach_bus_coordinates,
     attach_bus_mapping,
-    largest_connected_network,
     map_branches_to_cells,
     map_objects_to_cells,
     map_to_buses,
@@ -113,14 +112,9 @@ class SpatiotemporalMappingManager:
         return data
 
     def build_network(self) -> StandardNetwork:
-        """Retain every time version; mark connectivity without pruning assets."""
+        """Load every standard network record for spatial mapping."""
 
-        network = self.standard_data.load("network")
-        largest = largest_connected_network(network)
-        for name in ("bus", "branch", "transformer", "converter"):
-            frame = getattr(network, name)
-            frame["in_largest_connected_graph"] = frame.uid.isin(getattr(largest, name).uid)
-        return network
+        return self.standard_data.load("network")
 
     def build(
         self,
@@ -423,16 +417,16 @@ class SpatiotemporalMappingManager:
             if "network" in pending or not self.check("network").at[
                 "network", "available"
             ]:
-                connected_network = self.build_network()
+                source_network = self.build_network()
                 network = StandardNetwork(
                     map_objects_to_cells(
-                        connected_network.bus,
+                        source_network.bus,
                         cells,
                         metric_crs=self.options["metric_crs"],
                     ),
-                    connected_network.branch,
-                    connected_network.transformer,
-                    connected_network.converter,
+                    source_network.branch,
+                    source_network.transformer,
+                    source_network.converter,
                 )
                 for component in ("branch", "transformer", "converter"):
                     getattr(network, component).attrs[
@@ -613,6 +607,8 @@ class SpatiotemporalMappingManager:
             path,
             to_pandas_kwargs={"types_mapper": pd.ArrowDtype},
         )
+        if dataset_id == "network" and "in_largest_connected_graph" in data:
+            data = data.drop(columns="in_largest_connected_graph")
         data.attrs.update({
             "standard_dataset_id": dataset_id,
             "mapping_dataset_id": dataset_id,

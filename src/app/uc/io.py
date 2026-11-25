@@ -27,7 +27,8 @@ def operation_dataset(
         attrs={"timezone": timezone, "time_step": _time_step(snapshots)},
     )
     specs = (
-        ("generator", network.generators, network.generators_t, (("p", "p_mw", "MW"),)),
+        ("generator", network.generators.loc[~network.generators.carrier.eq("solar_heat")],
+         network.generators_t, (("p", "p_mw", "MW"),)),
         ("storage", network.storage_units, network.storage_units_t, (
             ("p", "p_mw", "MW"),
             ("p_store", "p_store_mw", "MW"),
@@ -73,8 +74,25 @@ def operation_dataset(
                     ("time", dimension), limits.reindex(columns=static.index).to_numpy(dtype=float)
                 )
                 data[f"{component}_p_limit_{side}_mw"].attrs["unit"] = "MW"
+    thermal = network.stores.index[network.stores.carrier.eq("thermal_storage")]
+    if len(thermal):
+        data = data.assign_coords(
+            thermal_uid=thermal.to_numpy(),
+            thermal_bus=("thermal_uid", network.links.loc[
+                [f"power_block:{uid}" for uid in thermal], "bus1"].to_numpy(dtype=str)),
+        )
+        for name, frame, keys, sign, unit in (
+            ("energy_mwh_th", network.stores_t.e, thermal, 1, "MWh_th"),
+            ("solar_mw_th", network.generators_t.p, [f"collector:{uid}" for uid in thermal], 1, "MW_th"),
+            ("output_mw", network.links_t.p1, [f"power_block:{uid}" for uid in thermal], -1, "MW"),
+        ):
+            data[f"thermal_{name}"] = (
+                ("time", "thermal_uid"),
+                sign * frame.reindex(index=snapshots, columns=keys).to_numpy(dtype=float),
+                {"unit": unit},
+            )
     optional = (
-        ("generator", network.generators, network.generators_t, (
+        ("generator", network.generators.reindex(data.generator_uid.values), network.generators_t, (
             ("status", "status", "binary"),
             ("start_up", "start_up", "binary"),
             ("shut_down", "shut_down", "binary"),

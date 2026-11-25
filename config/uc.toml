@@ -9,18 +9,26 @@ solve_mode = "single" # "rolling_horizon"
 rolling_horizon_hours = 12
 rolling_overlap_hours = 0
 
-[storage]
-initial_soc_pu = 0.5 # Fraction of p_nom * max_hours before the first interval.
-final_soc_pu = 0.5 # Exact SOC after the last interval of the full simulation.
-
-[reliability]
-enabled = true
-cost_eur_per_mwh = 10000.0
-capacity_multiplier = 1.2
-
 [solver]
 name = "copt"
 method = "ipm"
 time_limit_s = 2000.0
 mip_gap = 0.01
 log_to_console = false
+
+[reliability]
+enabled = true
+cost_eur_per_mwh = 10000.0
+capacity_multiplier = 1.2
+
+[storage]
+initial_soc_pu = 0.5 # Fraction of p_nom * max_hours before the first interval.
+final_soc_pu = 0.5 # Exact SOC after the last interval of the full simulation.
+
+[storage.models]
+# Unlisted subclasses use StorageUnit. Change this entry to "sensible_heat" to opt in.
+sensible_heat = "storage_unit"
+
+[storage.thermal]
+# Explicit resource proxy for demonstration scenarios.
+solar_profile = "pv_proxy"

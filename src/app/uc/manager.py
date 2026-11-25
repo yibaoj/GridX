@@ -12,6 +12,7 @@ from ...case import PowerSystemCase
 from .formulation import formulation_table
 from .io import load_result, operation_dataset, save_result
 from .model import UnitCommitmentResult
+from .storage import configure_storage_models
 
 
 class UnitCommitmentApplication:
@@ -70,6 +71,7 @@ class UnitCommitmentApplication:
             )
         _add_load_shedding(network, snapshots, self.config["reliability"])
         _configure_storage_soc(network, snapshots, self.config.get("storage", {}))
+        configure_storage_models(network, self.case, snapshots, self.config.get("storage", {}))
         solver = self.config["solver"]
         solver_options = _solver_options(solver)
         status, condition, objective = _optimize(
@@ -93,6 +95,8 @@ class UnitCommitmentApplication:
             network, snapshots, carrier="load_shedding"
         ).sum(axis=1)
         storage = network.storage_units_t.p.reindex(snapshots)
+        thermal = network.links.index[network.links.carrier.eq("thermal_storage")]
+        thermal_output = -network.links_t.p1.reindex(index=snapshots, columns=thermal)
         weights = network.snapshot_weightings["generators"].reindex(snapshots)
         summary = pd.Series({
             "solver_status": status,
@@ -109,7 +113,7 @@ class UnitCommitmentApplication:
             ),
             "storage_discharge_mwh": storage.clip(lower=0).mul(
                 weights, axis=0
-            ).sum().sum(),
+            ).sum().sum() + thermal_output.mul(weights, axis=0).sum().sum(),
             "storage_charge_mwh": -storage.clip(upper=0).mul(
                 weights, axis=0
             ).sum().sum(),
@@ -260,6 +264,14 @@ def _optimize(
     statuses = []
     for window_index, start in enumerate(range(0, len(snapshots), horizon)):
         window = snapshots[start:min(start + horizon, len(snapshots))]
+        if window_index and hasattr(network, "stores") and len(network.stores):
+            thermal = network.stores.index[network.stores.carrier.eq("thermal_storage")]
+            if len(thermal):
+                hours = network.snapshot_weightings.at[window[0], "stores"]
+                network.stores.loc[thermal, "e_initial"] = (
+                    network.stores_t.e.loc[snapshots[start - 1], thermal]
+                    * (1 - network.stores.loc[thermal, "standing_loss"]) ** hours
+                )
         if window_index and len(network.storage_units.index):
             previous = snapshots[start - 1]
             network.storage_units["state_of_charge_initial"] = (

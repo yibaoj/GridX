@@ -62,7 +62,12 @@ def aggregate_assets(
         first[capacity] = group[capacity].sum()
         if dataset_id == "storage":
             first["energy_capacity_mwh"] = group["energy_capacity_mwh"].sum(min_count=1)
-            first["duration_h"] = first["energy_capacity_mwh"] / first[capacity]
+            equivalent_energy = group["energy_capacity_mwh"].fillna(
+                group["duration_h"] * group[capacity]
+            )
+            first["duration_h"] = (
+                equivalent_energy.sum(min_count=len(group)) / first[capacity]
+            )
         first["status"] = "aggregated"
         first["source_uid"] = ";".join(sorted(group["uid"].astype(str)))
         first["geometry"] = (

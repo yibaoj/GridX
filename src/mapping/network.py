@@ -1,68 +1,13 @@
-"""Network connectivity and object-to-bus crosswalks."""
+"""Network and object-to-bus crosswalks."""
 
 from __future__ import annotations
 
 import warnings
 
 import geopandas as gpd
-import networkx as nx
 import numpy as np
 import pandas as pd
 import xarray as xr
-
-from ..standard import StandardNetwork
-
-
-def largest_connected_network(network: StandardNetwork) -> StandardNetwork:
-    """Return the largest subgraph connected by all electrical components."""
-
-    bus_uids = set(network.bus["uid"].dropna())
-    components = []
-    for name in ("branch", "transformer", "converter"):
-        frame = getattr(network, name)
-        valid = frame.loc[
-            frame["from_bus_uid"].isin(bus_uids)
-            & frame["to_bus_uid"].isin(bus_uids)
-            & frame["from_bus_uid"].ne(frame["to_bus_uid"])
-        ].copy()
-        components.append((name, valid))
-    graph = nx.Graph()
-    for _, frame in components:
-        graph.add_edges_from(frame[["from_bus_uid", "to_bus_uid"]].itertuples(
-            index=False, name=None,
-        ))
-    if graph.number_of_nodes() == 0:
-        raise ValueError("Network has no valid electrically connected buses.")
-    largest = max(nx.connected_components(graph), key=len)
-    bus = network.bus.loc[network.bus["uid"].isin(largest)].copy()
-    retained = {}
-    for name, frame in components:
-        retained[name] = frame.loc[
-            frame["from_bus_uid"].isin(largest)
-            & frame["to_bus_uid"].isin(largest)
-        ].copy()
-    for frame, source in ((bus, network.bus), *(
-        (retained[name], getattr(network, name))
-        for name in ("branch", "transformer", "converter")
-    )):
-        frame["in_largest_connected_graph"] = True
-        frame.attrs = source.attrs.copy()
-    result = StandardNetwork(
-        bus.reset_index(drop=True),
-        retained["branch"].reset_index(drop=True),
-        retained["transformer"].reset_index(drop=True),
-        retained["converter"].reset_index(drop=True),
-    )
-    validation = nx.Graph()
-    validation.add_nodes_from(result.bus["uid"])
-    for frame in (result.branch, result.transformer, result.converter):
-        validation.add_edges_from(frame[["from_bus_uid", "to_bus_uid"]].itertuples(
-            index=False, name=None,
-        ))
-    if not nx.is_connected(validation):
-        raise ValueError("Largest connected network validation failed.")
-    return result
-
 
 def map_objects_to_cells(
     objects: gpd.GeoDataFrame,

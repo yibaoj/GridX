@@ -51,6 +51,12 @@ description = "运行模拟"
 icon = "activity"
 
 [[layers]]
+id = "network"
+label = "网络"
+icon = "network"
+unit = "kV"
+
+[[layers]]
 id = "generator"
 label = "发电"
 icon = "factory"
@@ -63,28 +69,22 @@ icon = "battery-charging"
 unit = "MW"
 
 [[layers]]
-id = "network"
-label = "网络"
-icon = "network"
-unit = "kV"
-
-[[layers]]
 id = "load"
 label = "负荷"
 icon = "gauge"
 unit = "MW"
 
 [[layers]]
-id = "resource"
-label = "资源"
-icon = "wind"
-unit = "p.u."
-
-[[layers]]
 id = "population"
 label = "人口"
 icon = "users"
 unit = "人"
+
+[[layers]]
+id = "resource"
+label = "资源"
+icon = "wind"
+unit = "p.u."
 
 [[news]]
 date = "2026-08-07"
